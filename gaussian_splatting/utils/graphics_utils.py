@@ -29,7 +29,7 @@ def getWorld2View(R, t):
     Rt[3, 3] = 1.0
     return np.float32(Rt)
 
-
+# Mono-GS
 def getWorld2View2(R, t, translate=torch.tensor([0.0, 0.0, 0.0]), scale=1.0):
     translate = translate.to(R.device)
     Rt = torch.zeros((4, 4), device=R.device)
@@ -44,6 +44,21 @@ def getWorld2View2(R, t, translate=torch.tensor([0.0, 0.0, 0.0]), scale=1.0):
     C2W[:3, 3] = cam_center
     Rt = torch.linalg.inv(C2W)
     return Rt
+
+# GS original
+# def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
+#     Rt = np.zeros((4, 4))
+#     Rt[:3, :3] = R.transpose()
+#     Rt[:3, 3] = t
+#     Rt[3, 3] = 1.0
+
+#     C2W = np.linalg.inv(Rt)
+#     cam_center = C2W[:3, 3]
+#     cam_center = (cam_center + translate) * scale
+#     C2W[:3, 3] = cam_center
+#     Rt = np.linalg.inv(C2W)
+#     return np.float32(Rt)
+
 
 
 def getProjectionMatrix(znear, zfar, fovX, fovY):
@@ -66,6 +81,8 @@ def getProjectionMatrix(znear, zfar, fovX, fovY):
     P[3, 2] = z_sign
     P[2, 2] = -(zfar + znear) / (zfar - znear)
     P[2, 3] = -2 * (zfar * znear) / (zfar - znear)
+    # P[2, 2] = z_sign * zfar / (zfar - znear)
+    # P[2, 3] = -(zfar * znear) / (zfar - znear)
     return P
 
 
