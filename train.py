@@ -100,14 +100,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         opt_params.append(
             {
                 "params": [viewpoint_cam.cam_rot_delta],
-                "lr": 0.1,
+                "lr": 0.001,
                 "name": "rot_{}".format(viewpoint_cam.uid),
             }
         )
         opt_params.append(
             {
                 "params": [viewpoint_cam.cam_trans_delta],
-                "lr": 0.1,
+                "lr": 0.001,
                 "name": "trans_{}".format(viewpoint_cam.uid),
             }
         )
