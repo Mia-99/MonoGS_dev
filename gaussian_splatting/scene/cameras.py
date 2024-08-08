@@ -14,6 +14,9 @@ from torch import nn
 import numpy as np
 from gaussian_splatting.utils.graphics_utils import getWorld2View2, getProjectionMatrix, fov2focal, focal2fov, getWorld2View2_GS
 
+from utils.pose_utils import SO3_exp
+
+
 class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
@@ -23,11 +26,27 @@ class Camera(nn.Module):
 
         self.uid = uid
         self.colmap_id = colmap_id
-        self.R = torch.from_numpy(R)
-        self.T = torch.from_numpy(T)
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.image_name = image_name
+
+
+
+        self.R = torch.from_numpy(R)
+        self.T = torch.from_numpy(T)
+
+
+        # print(f"self.R.shape = {self.R.shape},  type = {self.R.dtype}")
+        # print(f"self.T.shape = {self.T.shape},  type = {self.T.dtype}")
+
+        # add some noise and see if the algorithm can correctly optimize it
+        noiseDeltaR = SO3_exp(torch.tensor([0.0, 0.0, 0.0])).double() 
+        noiseDeltaT = torch.tensor([0.0, 0.0, 0.0], dtype=torch.double)
+
+        self.T = self.T + noiseDeltaT
+        self.R = self.R @ noiseDeltaR
+
+
 
 
         # T = torch.eye(4, device=data_device)

@@ -95,7 +95,44 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
 
 
+        # optimize pose
+        opt_params = []
+        opt_params.append(
+            {
+                "params": [viewpoint_cam.cam_rot_delta],
+                "lr": 0.1,
+                "name": "rot_{}".format(viewpoint_cam.uid),
+            }
+        )
+        opt_params.append(
+            {
+                "params": [viewpoint_cam.cam_trans_delta],
+                "lr": 0.1,
+                "name": "trans_{}".format(viewpoint_cam.uid),
+            }
+        )
+        opt_params.append(
+            {
+                "params": [viewpoint_cam.exposure_a],
+                "lr": 0.01,
+                "name": "exposure_a_{}".format(viewpoint_cam.uid),
+            }
+        )
+        opt_params.append(
+            {
+                "params": [viewpoint_cam.exposure_b],
+                "lr": 0.01,
+                "name": "exposure_b_{}".format(viewpoint_cam.uid),
+            }
+        )
+        pose_optimizer = torch.optim.Adam(opt_params)
+        pose_optimizer.zero_grad()
+
+
+
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+
+
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         # Loss
@@ -134,24 +171,40 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
 
+
+
+
+
+            # Optimizer step
+            if iteration < opt.iterations:
+                pose_optimizer.step()
+                if (viewpoint_cam.uid == 1):
+                    print(f"camera {viewpoint_cam.uid}")
+                    print(f"            deltaT: {viewpoint_cam.cam_trans_delta}")
+                    print(f"                 T: {viewpoint_cam.T}")
+                # update pose
+                if viewpoint_cam.uid == 0:
+                    continue
+                update_pose(viewpoint_cam)
+                if (viewpoint_cam.uid == 1):
+                    print(f"              newT: {viewpoint_cam.T}")                
+                pose_optimizer.zero_grad()
+
+
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
+
 
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
 
-            # update pose
-            if viewpoint_cam.uid == 0:
-                continue
-            update_pose(viewpoint_cam)            
-            if (viewpoint_cam.uid == 1):
-                print(f"camera {viewpoint_cam.uid}")
-                print(f"                 R: {viewpoint_cam.R}")
-                print(f"                 T: {viewpoint_cam.T}")
+
+
+
 
 
 
