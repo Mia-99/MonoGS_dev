@@ -56,24 +56,25 @@ def get_expon_lr_func(
     :param max_steps: int, the number of steps during optimization.
     :return HoF which takes step as input
     """
-    # def helper(step):
-    #     if step < 0 or (lr_init == 0.0 and lr_final == 0.0):
-    #         # Disable this parameter
-    #         return 0.0
-    #     if lr_delay_steps > 0:
-    #         # A kind of reverse cosine decay.
-    #         delay_rate = lr_delay_mult + (1 - lr_delay_mult) * np.sin(
-    #             0.5 * np.pi * np.clip(step / lr_delay_steps, 0, 1)
-    #         )
-    #     else:
-    #         delay_rate = 1.0
-    #     t = np.clip(step / max_steps, 0, 1)
-    #     log_lerp = np.exp(np.log(lr_init) * (1 - t) + np.log(lr_final) * t)
-    #     return delay_rate * log_lerp
+
+    def helper(step):
+        if step < 0 or (lr_init == 0.0 and lr_final == 0.0):
+            # Disable this parameter
+            return 0.0
+        if lr_delay_steps > 0:
+            # A kind of reverse cosine decay.
+            delay_rate = lr_delay_mult + (1 - lr_delay_mult) * np.sin(
+                0.5 * np.pi * np.clip(step / lr_delay_steps, 0, 1)
+            )
+        else:
+            delay_rate = 1.0
+        t = np.clip(step / max_steps, 0, 1)
+        log_lerp = np.exp(np.log(lr_init) * (1 - t) + np.log(lr_final) * t)
+        # print(f"step = {step}")  # iteration
+        return delay_rate * log_lerp
 
     return helper
-    # return helper(lr_init=lr_init, lr_final=lr_final,
-    #               lr_delay_steps=lr_delay_steps, lr_delay_mult=lr_delay_mult, max_steps=max_steps)
+
 
 
 def helper(

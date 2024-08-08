@@ -17,7 +17,9 @@ from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.gaussian_renderer import network_gui
 import sys
-from gaussian_splatting.scene import Scene, GaussianModel
+from gaussian_splatting.scene import Scene
+from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
+
 from gaussian_splatting.utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
