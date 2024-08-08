@@ -40,8 +40,8 @@ class Camera(nn.Module):
         # print(f"self.T.shape = {self.T.shape},  type = {self.T.dtype}")
 
         # add some noise and see if the algorithm can correctly optimize it
-        noiseDeltaR = SO3_exp(torch.tensor([0.0, 0.0, 0.0])).double() 
-        noiseDeltaT = torch.tensor([0.0, 0.0, 0.0], dtype=torch.double)
+        noiseDeltaR = SO3_exp(torch.tensor([0.01, 0.01, 0.01])).double() 
+        noiseDeltaT = torch.tensor([0.1, 0.1, 0.1], dtype=torch.double)
 
         self.T = self.T + noiseDeltaT
         self.R = self.R @ noiseDeltaR
