@@ -26,6 +26,11 @@ from tqdm import tqdm
 from gaussian_splatting.utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
+
+
+from utils.pose_utils import update_pose
+
+
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -89,29 +94,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
 
 
-        # def update_pose(camera, converged_threshold=1e-4):
-        # tau = torch.cat([camera.cam_trans_delta, camera.cam_rot_delta], axis=0)
-
-        # T_w2c = torch.eye(4, device=tau.device)
-        # T_w2c[0:3, 0:3] = camera.R
-        # T_w2c[0:3, 3] = camera.T
-
-        # new_w2c = SE3_exp(tau) @ T_w2c
-
-        # new_R = new_w2c[0:3, 0:3]
-        # new_T = new_w2c[0:3, 3]
-
-        # converged = tau.norm() < converged_threshold
-        # camera.update_RT(new_R, new_T)
-
-        # camera.cam_rot_delta.data.fill_(0)
-        # camera.cam_trans_delta.data.fill_(0)
-        # return converged
-
-        viewpoint_cam.cam_rot_delta.data.fill_(0)
-        viewpoint_cam.cam_trans_delta.data.fill_(0)
-        
-
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
@@ -160,6 +142,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+
+
+            # update pose
+            if viewpoint_cam.uid == 0:
+                continue
+            update_pose(viewpoint_cam)            
+            if (viewpoint_cam.uid == 1):
+                print(f"camera {viewpoint_cam.uid}")
+                print(f"                 R: {viewpoint_cam.R}")
+                print(f"                 T: {viewpoint_cam.T}")
+
+
 
 def prepare_output_and_logger(args):    
     if not args.model_path:
