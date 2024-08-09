@@ -11,7 +11,14 @@
 
 import torch
 import numpy as np
-from gaussian_splatting.utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
+from gaussian_splatting.utils.general_utils import (
+    build_rotation,
+    build_scaling_rotation,
+    get_expon_lr_func,
+    helper,
+    inverse_sigmoid,
+    strip_symmetric,
+)
 from torch import nn
 import os
 from gaussian_splatting.utils.system_utils import mkdir_p
@@ -19,26 +26,10 @@ from plyfile import PlyData, PlyElement
 from gaussian_splatting.utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from gaussian_splatting.utils.graphics_utils import BasicPointCloud
-from gaussian_splatting.utils.general_utils import strip_symmetric, build_scaling_rotation
+
 
 class GaussianModel:
 
-    def setup_functions(self):
-        def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
-            L = build_scaling_rotation(scaling_modifier * scaling, rotation)
-            actual_covariance = L @ L.transpose(1, 2)
-            symm = strip_symmetric(actual_covariance)
-            return symm
-        
-        self.scaling_activation = torch.exp
-        self.scaling_inverse_activation = torch.log
-
-        self.covariance_activation = build_covariance_from_scaling_rotation
-
-        self.opacity_activation = torch.sigmoid
-        self.inverse_opacity_activation = inverse_sigmoid
-
-        self.rotation_activation = torch.nn.functional.normalize
 
 
     def __init__(self, sh_degree : int):
@@ -56,7 +47,29 @@ class GaussianModel:
         self.optimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
-        self.setup_functions()
+
+        self.scaling_activation = torch.exp
+        self.scaling_inverse_activation = torch.log
+
+        self.covariance_activation = self.build_covariance_from_scaling_rotation
+
+        self.opacity_activation = torch.sigmoid
+        self.inverse_opacity_activation = inverse_sigmoid
+
+        self.rotation_activation = torch.nn.functional.normalize
+
+
+        self.unique_kfIDs = torch.empty(0).int()
+        self.n_obs = torch.empty(0).int()
+
+
+
+    def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
+        L = build_scaling_rotation(scaling_modifier * scaling, rotation)
+        actual_covariance = L @ L.transpose(1, 2)
+        symm = strip_symmetric(actual_covariance)
+        return symm
+    
 
     def capture(self):
         return (

@@ -11,24 +11,36 @@
 
 
 import os
-import torch
+import sys
+import time
+from argparse import ArgumentParser, Namespace
+from datetime import datetime
+import uuid
+from tqdm import tqdm
+import wandb
 from random import randint
+import numpy as np
+
+import torch
+import torch.multiprocessing as mp
+
+
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.gaussian_renderer import network_gui
-import sys
 from gaussian_splatting.scene import Scene
 from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
-
 from gaussian_splatting.utils.general_utils import safe_state
-import uuid
-from tqdm import tqdm
 from gaussian_splatting.utils.image_utils import psnr
-from argparse import ArgumentParser, Namespace
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
 
 
 from utils.pose_utils import update_pose
+
+
+from gui import gui_utils, sfm_gui
+from utils.multiprocessing_utils import FakeQueue, clone_obj
+
 
 
 try:
@@ -37,12 +49,15 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+
+def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    # tb_writer = prepare_output_and_logger(dataset)
+
     gaussians.training_setup(opt)
+
+    print("start training")
+
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -53,17 +68,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
-    viewpoint_stack = None
+
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
 
 
-    if not viewpoint_stack:
-        viewpoint_stack = scene.getTrainCameras().copy()
-
-    N = 5
-    viewpoint_stack = viewpoint_stack[: N]
 
     # optimize pose
     opt_params = []
@@ -103,26 +113,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
 
 
+    for iteration in range(first_iter, 100):
 
 
+        print(f"iteration: {iteration}")
 
-
-
-    for iteration in range(first_iter, opt.iterations + 1):        
-        if network_gui.conn == None:
-            network_gui.try_connect()
-        while network_gui.conn != None:
-            try:
-                net_image_bytes = None
-                custom_cam, do_training, pipe.convert_SHs_python, pipe.compute_cov3D_python, keep_alive, scaling_modifer = network_gui.receive()
-                if custom_cam != None:
-                    net_image = render(custom_cam, gaussians, pipe, background, scaling_modifer)["render"]
-                    net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
-                network_gui.send(net_image_bytes, dataset.source_path)
-                if do_training and ((iteration < int(opt.iterations)) or not keep_alive):
-                    break
-            except Exception as e:
-                network_gui.conn = None
 
         iter_start.record()
 
@@ -138,8 +133,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             pipe.debug = True
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
-
-
 
 
 
@@ -175,13 +168,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
-            if (iteration in saving_iterations):
-                print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
+            # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            # if (iteration in saving_iterations):
+            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
+            #     scene.save(iteration)
 
             # Densification
-            if iteration < opt.densify_until_iter:
+            if 0 and iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
@@ -195,26 +188,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
 
 
-
-
             # Optimizer step
             if iteration > 0 and iteration < opt.iterations:
                 pose_optimizer.step()
                 for viewpoint_cam in viewpoint_stack:
                     if viewpoint_cam.uid != 0:
-                        # print test info
-                        if iteration % 10 == 0 and viewpoint_cam.uid == 2:
-                            print(f"camera {viewpoint_cam.uid}")
-                            print(f"            deltaT: {viewpoint_cam.cam_trans_delta}")
-                            print(f"                 T: {viewpoint_cam.T}")
-                            print(f"               gtT: {viewpoint_cam.T_gt}")
-                        # update pose
                         update_pose(viewpoint_cam)
-
                 pose_optimizer.zero_grad()
-
-
-
 
             # Optimizer step
             if iteration < opt.iterations:
@@ -222,10 +202,28 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
 
-            if (iteration in checkpoint_iterations):
-                print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+        if iteration % 10 == 0:
+            # img = viewpoint_stack[2].original_image.detach().clone()
+            depth = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
+            color = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
+            print(f"img.shape = {color.shape}")
+            q_main2vis.put_nowait(
+                gui_utils.GaussianPacket(
+                    # gaussians=clone_obj(gaussians),
+                    # current_frame=viewpoint_stack[2],
+                    gtcolor= color,
+                    gtdepth=depth,
+                    # keyframes=keyframes,
+                    # kf_window=current_window_dict,
+                )
+            )
+            print(f"add data: cam. q_main2vis.size() = {q_main2vis.qsize()}")
+            time.sleep(1)
 
+
+
+    q_main2vis.put_nowait(gui_utils.GaussianPacket(finish=True))
+    print("\nTraining complete.")
 
 
 
@@ -315,10 +313,80 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
-    # All done
-    print("\nTraining complete.")
+    dataset = lp.extract(args)
+    opt = op.extract(args)
+    pipe = pp.extract(args)
+
+
+
+    gaussians = GaussianModel(dataset.sh_degree)
+    scene = Scene(dataset, gaussians)
+
+    viewpoint_stack = scene.getTrainCameras().copy()
+
+    N = 5
+    viewpoint_stack = viewpoint_stack[: N]
+
+
+
+    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
+
+
+
+    ## visualization
+    use_gui = True
+    q_main2vis = mp.Queue() if use_gui else FakeQueue()
+    q_vis2main = mp.Queue() if use_gui else FakeQueue()
+
+
+
+
+
+
+    params_gui = gui_utils.ParamsGUI(
+        pipe=pp,
+        background=[1, 1, 1],
+        gaussians=GaussianModel(dataset.sh_degree),
+        q_main2vis=q_main2vis,
+        q_vis2main=q_vis2main,
+    )
+    gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
+    gui_process.start()
+    time.sleep(5)
+
+
+
+
+    # params_sfm = (q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    # sfm_process = mp.Process(target=training, args=params_sfm)
+    # sfm_process.start()
+
+
+    torch.cuda.synchronize()
+
+
+    training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+
+
+
+    print(f"FINISH. q_main2vis.size() = {q_main2vis.qsize()}")
+    while not q_main2vis.empty():
+        print(f"release queue. q_main2vis.size() = {q_main2vis.qsize()}")
+        q_main2vis.get()
+
+
+    if q_vis2main.empty():
+        print(f"q_vis2main.empty(): {q_vis2main.empty()}")
+        q_vis2main = None    
+    if q_main2vis.empty():
+        print(f"q_main2vis.empty(): {q_main2vis.empty()}")
+        q_main2vis = None
+
+
+    print("FINISHED")
+
+
+    gui_process.join()
+    sfm_gui.Log("GUI Stopped and joined the main thread")
+
