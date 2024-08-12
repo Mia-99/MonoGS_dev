@@ -436,13 +436,13 @@ class SFM_GUI:
                 self.gaussian_cur.get_xyz.shape[0]
             )
             self.init = True
-            Log("add gaussians in viewer.")
+            Log("add gaussians in viewer.", tag="GUI")
 
         if gaussian_packet.current_frame is not None:
             frustum = self.add_camera(
                 gaussian_packet.current_frame, name="current", color=[0, 1, 0]
             )
-            Log("add a camera in viewer.")
+            Log("add a camera in viewer.", tag="GUI")
             if self.followcam_chbox.checked:
                 viewpoint = (
                     frustum.view_dir_behind
@@ -549,7 +549,7 @@ class SFM_GUI:
 
     def get_current_cam(self):
         w2c = cv_gl @ self.widget3d.scene.camera.get_view_matrix()
-        Log(f"cv_gl @ self.widget3d.scene.camera.get_view_matrix() = {w2c}")
+        # Log(f"cv_gl @ self.widget3d.scene.camera.get_view_matrix() = {w2c}")
 
         image_gui = torch.zeros(
             (1, int(self.window.size.height), int(self.widget3d_width))
@@ -581,12 +581,26 @@ class SFM_GUI:
     def rasterise(self, current_cam):
 
 
-        Log(f"self.time_shader_chbox.checked = {self.time_shader_chbox.checked}")
-        Log(f"gaussian_cur = {self.gaussian_cur}")
-        Log(f"type(self.gaussian_cur) == GaussianPacket: {type(self.gaussian_cur) == GaussianPacket}")
+        # Log(f"self.time_shader_chbox.checked = {self.time_shader_chbox.checked}")
+        # Log(f"gaussian_cur = {self.gaussian_cur}")
+        # Log(f"type(self.gaussian_cur) == GaussianPacket: {type(self.gaussian_cur) == GaussianPacket}")
 
-        Log(f"self.background = {self.background}")
-        Log(f"self.gaussian_cur")
+        # Log(f"self.background = {self.background}")
+        # # Log(f"self.gaussian_cur = {self.gaussian_cur.__dict__}")
+        # Log(f"current_cam = {current_cam.__dict__}")
+
+        # viewmatrix=current_cam.world_view_transform
+        # projmatrix=current_cam.full_proj_transform
+        # projmatrix_raw=current_cam.projection_matrix
+        # image_height=int(current_cam.image_height)
+        # image_width=int(current_cam.image_width)
+        # campos=current_cam.camera_center      
+        # print(f"             viewmatrix = {viewmatrix}")
+        # print(f"             projmatrix = {projmatrix}")
+        # print(f"         projmatrix_raw = {projmatrix_raw}")
+        # print(f"           image_height = {image_height}")
+        # print(f"            image_width = {image_width}")
+        # print(f"                 campos = {campos}")
 
 
         if (
@@ -700,7 +714,7 @@ class SFM_GUI:
         return render_img
 
     def render_gui(self):
-        Log("render_gui enter:")
+        Log("render_gui:", tag="GUI")
         if not self.init:
             return
         current_cam = self.get_current_cam()
@@ -740,10 +754,7 @@ def run(params_gui=None):
 
 
 def main():
-    # app = o3d.visualization.gui.Application.instance
-    # app.initialize()
     win = SFM_GUI()
-    # app.run()
 
 
 if __name__ == "__main__":

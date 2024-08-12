@@ -539,9 +539,9 @@ class SLAM_GUI:
 
     def rasterise(self, current_cam):
 
-        Log(f"self.time_shader_chbox.checked = {self.time_shader_chbox.checked}")
-        Log(f"gaussian_cur = {self.gaussian_cur}")
-        Log(f"type(self.gaussian_cur) == GaussianPacket: {type(self.gaussian_cur) == GaussianPacket}")
+        # Log(f"self.time_shader_chbox.checked = {self.time_shader_chbox.checked}")
+        # Log(f"gaussian_cur = {self.gaussian_cur}")
+        # Log(f"type(self.gaussian_cur) == GaussianPacket: {type(self.gaussian_cur) == GaussianPacket}")
 
 
         if (

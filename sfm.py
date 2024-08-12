@@ -57,15 +57,10 @@ except ImportError:
 
 
 
-def training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
 
 
     print("start training")
-
-    # time.sleep(5)
-
-
-
 
     first_iter = 0
     # tb_writer = prepare_output_and_logger(dataset)
@@ -135,9 +130,6 @@ def training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe,
     for iteration in range(first_iter, 100):
 
 
-        print(f"iteration: {iteration}")
-
-
         iter_start.record()
 
         gaussians.update_learning_rate(iteration)
@@ -186,14 +178,8 @@ def training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe,
             if iteration == opt.iterations:
                 progress_bar.close()
 
-            # Log and save
-            # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
-            # if (iteration in saving_iterations):
-            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
-            #     scene.save(iteration)
-
             # Densification
-            if 0 and iteration < opt.densify_until_iter:
+            if 1 and iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
@@ -204,7 +190,6 @@ def training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe,
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
-
 
 
             # Optimizer step
@@ -221,24 +206,19 @@ def training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe,
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
 
-            if 1 and iteration % 2 == 0:
-                # img = viewpoint_stack[2].original_image.detach().clone()
-                depth = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
-                color = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
-                print(f"img.shape = {color.shape}")
+            if 1 and iteration % 10 == 0:
+                depth = np.zeros((viewpoint_stack[0].image_height, viewpoint_stack[0].image_width))
                 q_main2vis.put(
                     gui_utils.GaussianPacket(
-                        gaussians=clone_obj(gaussians),
-                        current_frame=viewpoint_stack[2],
-                        # gtcolor= color,
-                        # gtdepth=depth,
-                        # keyframes=keyframes,
-                        # kf_window=current_window_dict,
+                        gaussians=gaussians,  #clone_obj(gaussians)
+                        keyframes=viewpoint_stack,
+                        current_frame=viewpoint_stack[0],
+                        gtcolor=viewpoint_stack[0].original_image,
+                        gtdepth=depth,
                     )
                 )
-                print(f"add data: cam. q_main2vis.size() = {q_main2vis.qsize()}")
-                time.sleep(1)    
-
+                # time.sleep(1)
+                print("")
   
     print("\nTraining complete.")
 
@@ -297,7 +277,7 @@ if __name__ == "__main__":
 
 
 
-    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
+    torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
 
 
@@ -305,79 +285,40 @@ if __name__ == "__main__":
     use_gui = True
     q_main2vis = mp.Queue() if use_gui else FakeQueue()
     q_vis2main = mp.Queue() if use_gui else FakeQueue()
-    q_test = mp.SimpleQueue()
 
-
-
-
+    bg_color = [1, 1, 1]
     params_gui = gui_utils.ParamsGUI(
         pipe=pipe,
-        background=[1, 1, 1],
+        background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
         gaussians=GaussianModel(dataset.sh_degree),
         q_main2vis=q_main2vis,
         q_vis2main=q_vis2main,
     )
     gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
     gui_process.start()
+
+
+    q_main2vis.put(
+        gui_utils.GaussianPacket(
+            gaussians=gaussians,
+            current_frame=viewpoint_stack[0],
+            keyframes=viewpoint_stack,
+        )
+    )
     time.sleep(2)
-
-
-
-
-    # q_main2vis.put(
-    #     gui_utils.GaussianPacket(
-    #         gaussians=gaussians,
-    #         current_frame=viewpoint_stack[0],
-    #         # gtcolor= color,
-    #         # gtdepth=depth,
-    #         # keyframes=keyframes,
-    #         # kf_window=current_window_dict,
-    #     )
-    # )
-    # print(f"add data: cam. q_main2vis.size() = {q_main2vis.qsize()}")            
-    # time.sleep(2)
-
-
 
 
 
     torch.cuda.synchronize()
 
 
-    training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
-
-
+    training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
 
     q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-
-
-
-    # test queue
-    while not q_test.empty():
-        print(f"release queue. q_test.size() = {q_test.qsize()}")
-        q_test.get()
-
-
-    # time.sleep(2)
-
-
-    # while not q_main2vis.empty():
-    #     print(f"release queue. q_main2vis.size() = {q_main2vis.qsize()}")
-    #     q_main2vis.get()
-
-
-    # if q_vis2main.empty():
-    #     print(f"q_vis2main.empty(): {q_vis2main.empty()}")
-    #     q_vis2main = None    
-    # if q_main2vis.empty():
-    #     print(f"q_main2vis.empty(): {q_main2vis.empty()}")
-    #     q_main2vis = None
-
-    q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-    print("FINISHED")
-
-
     gui_process.join()
-    sfm_gui.Log("GUI Stopped and joined the main thread")
 
+
+    sfm_gui.Log("GUI Stopped and joined the main thread")
+    
+    print("FINISHED")

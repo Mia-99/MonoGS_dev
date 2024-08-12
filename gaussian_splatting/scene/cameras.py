@@ -149,14 +149,14 @@ class Camera(nn.Module):
         # print(f"t = {t}")
         img = torch.randint(0, 256, size=(3, H, W), dtype=torch.uint8)
 
-        print(f"Camera:")
-        print(f"      uid = {uid}")
-        print(f"     FoVx = {FoVx}")
-        print(f"     FoVy = {FoVy}")
-        print(f"        H = {H}")
-        print(f"        W = {W}")
-        print(f"        R = {R}")
-        print(f"        t = {t}")
+        # print(f"Camera:")
+        # print(f"      uid = {uid}")
+        # print(f"     FoVx = {FoVx}")
+        # print(f"     FoVy = {FoVy}")
+        # print(f"        H = {H}")
+        # print(f"        W = {W}")
+        # print(f"        R = {R}")
+        # print(f"        t = {t}")
 
         return Camera(
             uid, R, t, FoVx, FoVy, img, None, None, uid,
