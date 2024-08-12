@@ -60,6 +60,10 @@ o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
 class SFM_GUI:
     def __init__(self, params_gui=None):
+
+        app = o3d.visualization.gui.Application.instance
+        app.initialize()
+
         self.step = 0
         self.process_finished = False
         self.device = "cuda"
@@ -102,6 +106,10 @@ class SFM_GUI:
         self.save_path.mkdir(parents=True, exist_ok=True)
 
         threading.Thread(target=self._update_thread).start()
+
+        app.run()
+
+
 
     def init_widget(self):
         self.window_w, self.window_h = 1600, 900
@@ -415,13 +423,12 @@ class SFM_GUI:
             self.combo_gaussian_id.add_item(str(idx))
 
     def receive_data(self, q):
-        print("receive data enter:")
         if q is None:
-            return
+            return False
 
         gaussian_packet = get_latest_queue(q)
         if gaussian_packet is None:
-            return
+            return False
 
         if gaussian_packet.has_gaussians:
             self.gaussian_cur = gaussian_packet
@@ -429,13 +436,13 @@ class SFM_GUI:
                 self.gaussian_cur.get_xyz.shape[0]
             )
             self.init = True
-            print("add gaussians in viewer.")
+            Log("add gaussians in viewer.")
 
         if gaussian_packet.current_frame is not None:
             frustum = self.add_camera(
                 gaussian_packet.current_frame, name="current", color=[0, 1, 0]
             )
-            print("add a camera in viewer.")
+            Log("add a camera in viewer.")
             if self.followcam_chbox.checked:
                 viewpoint = (
                     frustum.view_dir_behind
@@ -486,6 +493,9 @@ class SFM_GUI:
             self.q_vis2main = None
             self.q_main2vis = None
             self.process_finished = True
+
+        return True
+    
 
     @staticmethod
     def depth_to_normal(points, k=3, d_min=1e-3, d_max=10.0):
@@ -539,6 +549,7 @@ class SFM_GUI:
 
     def get_current_cam(self):
         w2c = cv_gl @ self.widget3d.scene.camera.get_view_matrix()
+        Log(f"cv_gl @ self.widget3d.scene.camera.get_view_matrix() = {w2c}")
 
         image_gui = torch.zeros(
             (1, int(self.window.size.height), int(self.widget3d_width))
@@ -568,6 +579,16 @@ class SFM_GUI:
         return current_cam
 
     def rasterise(self, current_cam):
+
+
+        Log(f"self.time_shader_chbox.checked = {self.time_shader_chbox.checked}")
+        Log(f"gaussian_cur = {self.gaussian_cur}")
+        Log(f"type(self.gaussian_cur) == GaussianPacket: {type(self.gaussian_cur) == GaussianPacket}")
+
+        Log(f"self.background = {self.background}")
+        Log(f"self.gaussian_cur")
+
+
         if (
             self.time_shader_chbox.checked
             and self.gaussian_cur is not None
@@ -590,7 +611,7 @@ class SFM_GUI:
                 self.scaling_slider.double_value,
             )
             self.gaussian_cur.get_features = features
-        else:
+        else:            
             rendering_data = render(
                 current_cam,
                 self.gaussian_cur,
@@ -679,6 +700,7 @@ class SFM_GUI:
         return render_img
 
     def render_gui(self):
+        Log("render_gui enter:")
         if not self.init:
             return
         current_cam = self.get_current_cam()
@@ -688,10 +710,6 @@ class SFM_GUI:
         self.render_img = self.render_o3d_image(results, current_cam)
         self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)
 
-    def scene_update(self):
-        print("scene update: receive data")
-        self.receive_data(self.q_main2vis)
-        self.render_gui()
 
     def _update_thread(self):
         while True:
@@ -699,34 +717,33 @@ class SFM_GUI:
             self.step += 1
             if self.process_finished:
                 o3d.visualization.gui.Application.instance.quit()
-                Log("Closing Visualization", tag="GUI")
-                break
+                Log("Closing Visualization", tag="GUI")                
+                # break
+                return
 
-            def update():
-                print(f"update called at step {self.step}")
+            def update():                
                 if self.step % 3 == 0:
-                    self.scene_update()
+                    status = self.receive_data(self.q_main2vis)
+                    if status:
+                        self.render_gui()
 
                 if self.step >= 1e9:
                     self.step = 0
 
-            # print(f"update_thread called at step {self.step}") # called properly here
             gui.Application.instance.post_to_main_thread(self.window, update)
             
 
 
 def run(params_gui=None):
-    app = o3d.visualization.gui.Application.instance
-    app.initialize()
     win = SFM_GUI(params_gui)
-    app.run()
+
 
 
 def main():
-    app = o3d.visualization.gui.Application.instance
-    app.initialize()
+    # app = o3d.visualization.gui.Application.instance
+    # app.initialize()
     win = SFM_GUI()
-    app.run()
+    # app.run()
 
 
 if __name__ == "__main__":

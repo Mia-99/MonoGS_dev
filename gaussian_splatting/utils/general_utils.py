@@ -57,7 +57,7 @@ def get_expon_lr_func(
     :return HoF which takes step as input
     """
 
-    def helper(step):
+    def returnHelper(step):
         if step < 0 or (lr_init == 0.0 and lr_final == 0.0):
             # Disable this parameter
             return 0.0
@@ -73,7 +73,8 @@ def get_expon_lr_func(
         # print(f"step = {step}")  # iteration
         return delay_rate * log_lerp
 
-    return helper
+    return returnHelper
+
 
 
 

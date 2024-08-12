@@ -127,10 +127,48 @@ class Camera(nn.Module):
 
 
 
+    # @staticmethod
+    # def init_from_gui(uid, T, FoVx, FoVy, fx, fy, cx, cy, H, W):
+    #     projection_matrix = getProjectionMatrix2(
+    #         znear=0.01, zfar=100.0, fx=fx, fy=fy, cx=cx, cy=cy, W=W, H=H
+    #     ).transpose(0, 1)
+    #     return Camera(
+    #         uid, None, None, T, projection_matrix, fx, fy, cx, cy, FoVx, FoVy, H, W
+    #     )
+
+    # @property
+    # def world_view_transform(self):
+    #     return getWorld2View2(self.R, self.T).transpose(0, 1)
+
+
+    @staticmethod
+    def init_from_gui(uid, T, FoVx, FoVy, fx, fy, cx, cy, H, W):
+        R = T[:3, :3].cpu().numpy()
+        t = T[:3, 3].cpu().numpy()
+        # print(f"R = {R}")
+        # print(f"t = {t}")
+        img = torch.randint(0, 256, size=(3, H, W), dtype=torch.uint8)
+
+        print(f"Camera:")
+        print(f"      uid = {uid}")
+        print(f"     FoVx = {FoVx}")
+        print(f"     FoVy = {FoVy}")
+        print(f"        H = {H}")
+        print(f"        W = {W}")
+        print(f"        R = {R}")
+        print(f"        t = {t}")
+
+        return Camera(
+            uid, R, t, FoVx, FoVy, img, None, None, uid,
+        )
+    
+
     @property
-    def world_view_transform(self):        
-        # return getWorld2View2(self.R, self.T).transpose(0, 1).to(device=self.device)
-        return getWorld2View2(self.R, self.T, torch.from_numpy(self.trans), self.scale).transpose(0, 1).to(device=self.device)
+    def world_view_transform(self):
+        # print(f"self.R = {self.R},   self.T = {self.T}")
+        T = getWorld2View2(self.R, self.T, torch.from_numpy(self.trans), self.scale).transpose(0, 1).to(device=self.device)
+        # print(f"world_view_transform = {T}")
+        return T
 
 
     @property

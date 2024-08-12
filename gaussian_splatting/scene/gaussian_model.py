@@ -308,12 +308,12 @@ class GaussianModel:
         ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
-        self.xyz_scheduler_args = get_expon_lr_func(
-            lr_init=training_args.position_lr_init * self.spatial_lr_scale,
-            lr_final=training_args.position_lr_final * self.spatial_lr_scale,
-            lr_delay_mult=training_args.position_lr_delay_mult,
-            max_steps=training_args.position_lr_max_steps,
-        )
+        # self.xyz_scheduler_args = get_expon_lr_func(
+        #     lr_init=training_args.position_lr_init * self.spatial_lr_scale,
+        #     lr_final=training_args.position_lr_final * self.spatial_lr_scale,
+        #     lr_delay_mult=training_args.position_lr_delay_mult,
+        #     max_steps=training_args.position_lr_max_steps,
+        # )
 
         self.lr_init = training_args.position_lr_init * self.spatial_lr_scale
         self.lr_final = training_args.position_lr_final * self.spatial_lr_scale
@@ -332,7 +332,6 @@ class GaussianModel:
                     lr_delay_mult=self.lr_delay_mult,
                     max_steps=self.max_steps,
                 )
-
                 param_group["lr"] = lr
                 return lr
 

@@ -174,17 +174,29 @@ class GaussianModel:
         ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
-        self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
-                                                    lr_final=training_args.position_lr_final*self.spatial_lr_scale,
-                                                    lr_delay_mult=training_args.position_lr_delay_mult,
-                                                    max_steps=training_args.position_lr_max_steps)
+        # self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
+        #                                             lr_final=training_args.position_lr_final*self.spatial_lr_scale,
+        #                                             lr_delay_mult=training_args.position_lr_delay_mult,
+        #                                             max_steps=training_args.position_lr_max_steps)
+        self.lr_init = training_args.position_lr_init * self.spatial_lr_scale
+        self.lr_final = training_args.position_lr_final * self.spatial_lr_scale
+        self.lr_delay_mult = training_args.position_lr_delay_mult
+        self.max_steps = training_args.position_lr_max_steps
+
 
     def update_learning_rate(self, iteration):
         ''' Learning rate scheduling per step '''
         for param_group in self.optimizer.param_groups:
             if param_group["name"] == "xyz":
                 # print(f"iteration = {iteration}")
-                lr = self.xyz_scheduler_args(iteration)
+                # lr = self.xyz_scheduler_args(iteration)
+                lr = helper(
+                    iteration,
+                    lr_init=self.lr_init,
+                    lr_final=self.lr_final,
+                    lr_delay_mult=self.lr_delay_mult,
+                    max_steps=self.max_steps,
+                )
                 param_group['lr'] = lr
                 return lr
 

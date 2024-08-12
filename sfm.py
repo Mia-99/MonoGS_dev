@@ -41,6 +41,8 @@ from utils.pose_utils import update_pose
 from gui import gui_utils, sfm_gui
 from utils.multiprocessing_utils import FakeQueue, clone_obj
 
+from gaussian_splatting.scene.cameras import Camera
+
 
 
 try:
@@ -50,13 +52,29 @@ except ImportError:
     TENSORBOARD_FOUND = False
 
 
-def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+
+
+
+
+
+def training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+
+
+    print("start training")
+
+    # time.sleep(5)
+
+
+
+
     first_iter = 0
     # tb_writer = prepare_output_and_logger(dataset)
 
     gaussians.training_setup(opt)
 
-    print("start training")
+    
+
+
 
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -112,6 +130,7 @@ def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing
 
 
 
+    
 
     for iteration in range(first_iter, 100):
 
@@ -202,95 +221,37 @@ def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
 
-        if iteration % 10 == 0:
-            # img = viewpoint_stack[2].original_image.detach().clone()
-            depth = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
-            color = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
-            print(f"img.shape = {color.shape}")
-            q_main2vis.put_nowait(
-                gui_utils.GaussianPacket(
-                    # gaussians=clone_obj(gaussians),
-                    # current_frame=viewpoint_stack[2],
-                    gtcolor= color,
-                    gtdepth=depth,
-                    # keyframes=keyframes,
-                    # kf_window=current_window_dict,
+            if 1 and iteration % 2 == 0:
+                # img = viewpoint_stack[2].original_image.detach().clone()
+                depth = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
+                color = np.zeros((viewpoint_stack[2].image_height, viewpoint_stack[2].image_width))
+                print(f"img.shape = {color.shape}")
+                q_main2vis.put(
+                    gui_utils.GaussianPacket(
+                        gaussians=clone_obj(gaussians),
+                        current_frame=viewpoint_stack[2],
+                        # gtcolor= color,
+                        # gtdepth=depth,
+                        # keyframes=keyframes,
+                        # kf_window=current_window_dict,
+                    )
                 )
-            )
-            print(f"add data: cam. q_main2vis.size() = {q_main2vis.qsize()}")
-            time.sleep(1)
+                print(f"add data: cam. q_main2vis.size() = {q_main2vis.qsize()}")
+                time.sleep(1)    
 
-
-
-    q_main2vis.put_nowait(gui_utils.GaussianPacket(finish=True))
+  
     print("\nTraining complete.")
 
 
 
 
 
-
-
-def prepare_output_and_logger(args):    
-    if not args.model_path:
-        if os.getenv('OAR_JOB_ID'):
-            unique_str=os.getenv('OAR_JOB_ID')
-        else:
-            unique_str = str(uuid.uuid4())
-        args.model_path = os.path.join("./output/", unique_str[0:10])
-        
-    # Set up output folder
-    print("Output folder: {}".format(args.model_path))
-    os.makedirs(args.model_path, exist_ok = True)
-    with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
-        cfg_log_f.write(str(Namespace(**vars(args))))
-
-    # Create Tensorboard writer
-    tb_writer = None
-    if TENSORBOARD_FOUND:
-        tb_writer = SummaryWriter(args.model_path)
-    else:
-        print("Tensorboard not available: not logging progress")
-    return tb_writer
-
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
-    if tb_writer:
-        tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
-        tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
-        tb_writer.add_scalar('iter_time', elapsed, iteration)
-
-    # Report test and samples of training set
-    if iteration in testing_iterations:
-        torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
-                              {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
-
-        for config in validation_configs:
-            if config['cameras'] and len(config['cameras']) > 0:
-                l1_test = 0.0
-                psnr_test = 0.0
-                for idx, viewpoint in enumerate(config['cameras']):
-                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
-                    gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                    if tb_writer and (idx < 5):
-                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
-                        if iteration == testing_iterations[0]:
-                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
-                    l1_test += l1_loss(image, gt_image).mean().double()
-                    psnr_test += psnr(image, gt_image).mean().double()
-                psnr_test /= len(config['cameras'])
-                l1_test /= len(config['cameras'])          
-                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
-                if tb_writer:
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
-
-        if tb_writer:
-            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
-            tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
-        torch.cuda.empty_cache()
-
 if __name__ == "__main__":
+
+    print(f"mp.get_all_start_methods() = {mp.get_all_start_methods()}") 
+    mp.set_start_method('spawn')
+
+
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
     lp = ModelParams(parser)
@@ -319,6 +280,12 @@ if __name__ == "__main__":
     pipe = pp.extract(args)
 
 
+    
+
+    print(f"mp.get_start_method() = {mp.get_start_method()}")
+
+    
+
 
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
@@ -338,14 +305,13 @@ if __name__ == "__main__":
     use_gui = True
     q_main2vis = mp.Queue() if use_gui else FakeQueue()
     q_vis2main = mp.Queue() if use_gui else FakeQueue()
-
-
+    q_test = mp.SimpleQueue()
 
 
 
 
     params_gui = gui_utils.ParamsGUI(
-        pipe=pp,
+        pipe=pipe,
         background=[1, 1, 1],
         gaussians=GaussianModel(dataset.sh_degree),
         q_main2vis=q_main2vis,
@@ -353,37 +319,62 @@ if __name__ == "__main__":
     )
     gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
     gui_process.start()
-    time.sleep(5)
+    time.sleep(2)
 
 
 
 
-    # params_sfm = (q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
-    # sfm_process = mp.Process(target=training, args=params_sfm)
-    # sfm_process.start()
+    # q_main2vis.put(
+    #     gui_utils.GaussianPacket(
+    #         gaussians=gaussians,
+    #         current_frame=viewpoint_stack[0],
+    #         # gtcolor= color,
+    #         # gtdepth=depth,
+    #         # keyframes=keyframes,
+    #         # kf_window=current_window_dict,
+    #     )
+    # )
+    # print(f"add data: cam. q_main2vis.size() = {q_main2vis.qsize()}")            
+    # time.sleep(2)
+
+
+
 
 
     torch.cuda.synchronize()
 
 
-    training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(gaussians, viewpoint_stack, q_main2vis, q_test, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
 
 
-    print(f"FINISH. q_main2vis.size() = {q_main2vis.qsize()}")
-    while not q_main2vis.empty():
-        print(f"release queue. q_main2vis.size() = {q_main2vis.qsize()}")
-        q_main2vis.get()
+
+    q_main2vis.put(gui_utils.GaussianPacket(finish=True))
 
 
-    if q_vis2main.empty():
-        print(f"q_vis2main.empty(): {q_vis2main.empty()}")
-        q_vis2main = None    
-    if q_main2vis.empty():
-        print(f"q_main2vis.empty(): {q_main2vis.empty()}")
-        q_main2vis = None
+
+    # test queue
+    while not q_test.empty():
+        print(f"release queue. q_test.size() = {q_test.qsize()}")
+        q_test.get()
 
 
+    # time.sleep(2)
+
+
+    # while not q_main2vis.empty():
+    #     print(f"release queue. q_main2vis.size() = {q_main2vis.qsize()}")
+    #     q_main2vis.get()
+
+
+    # if q_vis2main.empty():
+    #     print(f"q_vis2main.empty(): {q_vis2main.empty()}")
+    #     q_vis2main = None    
+    # if q_main2vis.empty():
+    #     print(f"q_main2vis.empty(): {q_main2vis.empty()}")
+    #     q_main2vis = None
+
+    q_main2vis.put(gui_utils.GaussianPacket(finish=True))
     print("FINISHED")
 
 
