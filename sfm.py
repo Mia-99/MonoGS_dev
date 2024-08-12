@@ -55,7 +55,6 @@ except ImportError:
 class SFM:
 
     def __init__(self, pipe = None, q_main2vis = None, q_vis2main = None) -> None:
-
         self.pipe = pipe
         self.q_main2vis = q_main2vis
         self.q_vis2main = q_vis2main
