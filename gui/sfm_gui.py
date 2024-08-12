@@ -493,6 +493,7 @@ class SFM_GUI:
             self.q_vis2main = None
             self.q_main2vis = None
             self.process_finished = True
+            return False
 
         return True
     
@@ -732,7 +733,6 @@ class SFM_GUI:
             if self.process_finished: 
                 o3d.visualization.gui.Application.instance.quit()                            
                 Log("Closing Visualization", tag="GUI")
-                # break
                 return
 
             def update():                

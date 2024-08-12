@@ -27,7 +27,6 @@ import torch.multiprocessing as mp
 
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from gaussian_splatting.gaussian_renderer import render
-from gaussian_splatting.gaussian_renderer import network_gui
 from gaussian_splatting.scene import Scene
 from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
 from gaussian_splatting.utils.general_utils import safe_state
@@ -40,8 +39,6 @@ from utils.pose_utils import update_pose
 
 from gui import gui_utils, sfm_gui
 from utils.multiprocessing_utils import FakeQueue, clone_obj
-
-from gaussian_splatting.scene.cameras import Camera
 
 
 
@@ -244,7 +241,6 @@ def runBundleAdjustment(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pi
 
 if __name__ == "__main__":
 
-    print(f"mp.get_all_start_methods() = {mp.get_all_start_methods()}") 
     mp.set_start_method('spawn')
 
 
@@ -278,9 +274,6 @@ if __name__ == "__main__":
 
     
 
-    print(f"mp.get_start_method() = {mp.get_start_method()}")
-
-    
 
 
     gaussians = GaussianModel(dataset.sh_degree)
@@ -323,6 +316,4 @@ if __name__ == "__main__":
     gui_process.join()
 
 
-    sfm_gui.Log("GUI Stopped and joined the main thread")
-
-    time.sleep(1)
+    sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
