@@ -93,6 +93,9 @@ class Camera(nn.Module):
         self.cy = (self.image_height - 1) * 0.5
 
 
+        # add self-calibration variables
+        self.focal = 100
+        self.kappa = 1.0
 
 
         self.cam_rot_delta = nn.Parameter(

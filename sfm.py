@@ -223,7 +223,7 @@ def runBundleAdjustment(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pi
                         gaussians=gaussians,  #clone_obj(gaussians)
                         keyframes=viewpoint_stack,
                         current_frame=viewpoint_stack[cam_cnt],
-                        gtcolor=viewpoint_stack[0].original_image,
+                        gtcolor=viewpoint_stack[cam_cnt].original_image,
                         gtdepth=depth,
                     )
                 )
@@ -281,7 +281,7 @@ if __name__ == "__main__":
 
     viewpoint_stack = scene.getTrainCameras().copy()
 
-    N = 2
+    N = 3
     viewpoint_stack = viewpoint_stack[: N]
 
 
