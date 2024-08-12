@@ -115,7 +115,7 @@ class SFM_GUI:
         self.window_w, self.window_h = 1600, 900
 
         self.window = gui.Application.instance.create_window(
-            "SFM", self.window_w, self.window_h
+            "Structure from Motion", self.window_w, self.window_h
         )
         self.window.set_on_layout(self._on_layout)
         self.window.set_on_close(self._on_close)
@@ -243,9 +243,16 @@ class SFM_GUI:
         tab_margins = gui.Margins(0, int(np.round(0.5 * em)), 0, 0)
         tabs = gui.TabControl()
 
+
+
         tab_info = gui.Vert(0, tab_margins)
+        self.calib_info = gui.Label("Calibration: ")
+        tab_info.add_child(self.calib_info)
+        
         self.output_info = gui.Label("Number of Gaussians: ")
         tab_info.add_child(self.output_info)
+
+
 
         self.in_rgb_widget = gui.ImageWidget()
         self.in_depth_widget = gui.ImageWidget()
@@ -254,6 +261,13 @@ class SFM_GUI:
         tab_info.add_child(self.in_depth_widget)
 
         tabs.add_tab("Info", tab_info)
+
+
+        tab_calib = gui.Vert(0, tab_margins)
+        tab_calib.add_child(self.calib_info)
+        tabs.add_tab("Calibration", tab_calib)
+
+
         self.panel.add_child(tabs)
         self.window.add_child(self.panel)
 
@@ -450,6 +464,12 @@ class SFM_GUI:
                     else frustum.view_dir
                 )
                 self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
+            # calibration parameters panel output
+            self.calib_info.text = "focal: {},   kappa: {}".format(
+                gaussian_packet.current_frame.focal, gaussian_packet.current_frame.kappa
+            )
+
+
 
         if gaussian_packet.keyframe is not None:
             name = "keyframe_{}".format(gaussian_packet.keyframe.uid)
