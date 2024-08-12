@@ -57,7 +57,18 @@ except ImportError:
 
 
 
-def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def runBundleAdjustment(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+
+    cam_cnt = 0
+
+    q_main2vis.put(
+        gui_utils.GaussianPacket(
+            gaussians=gaussians,
+            current_frame=viewpoint_stack[cam_cnt],
+            keyframes=viewpoint_stack,
+        )
+    )
+    time.sleep(1.5)
 
 
     print("start training")
@@ -127,7 +138,7 @@ def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing
 
     
 
-    for iteration in range(first_iter, 100):
+    for iteration in range(first_iter, 1000):
 
 
         iter_start.record()
@@ -179,7 +190,7 @@ def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing
                 progress_bar.close()
 
             # Densification
-            if 1 and iteration < opt.densify_until_iter:
+            if True and iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
@@ -206,21 +217,26 @@ def training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, testing
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
 
-            if 1 and iteration % 10 == 0:
+            if True and iteration % 10 == 0:
+                cam_cnt += 1
+                cam_cnt = cam_cnt % len(viewpoint_stack)
                 depth = np.zeros((viewpoint_stack[0].image_height, viewpoint_stack[0].image_width))
                 q_main2vis.put(
                     gui_utils.GaussianPacket(
                         gaussians=gaussians,  #clone_obj(gaussians)
                         keyframes=viewpoint_stack,
-                        current_frame=viewpoint_stack[0],
+                        current_frame=viewpoint_stack[cam_cnt],
                         gtcolor=viewpoint_stack[0].original_image,
                         gtdepth=depth,
                     )
                 )
-                # time.sleep(1)
+                # time.sleep(0.001)
                 print("")
-  
+
+
+    q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
     print("\nTraining complete.")
+    time.sleep(1.0)
 
 
 
@@ -272,7 +288,7 @@ if __name__ == "__main__":
 
     viewpoint_stack = scene.getTrainCameras().copy()
 
-    N = 5
+    N = 2
     viewpoint_stack = viewpoint_stack[: N]
 
 
@@ -298,27 +314,15 @@ if __name__ == "__main__":
     gui_process.start()
 
 
-    q_main2vis.put(
-        gui_utils.GaussianPacket(
-            gaussians=gaussians,
-            current_frame=viewpoint_stack[0],
-            keyframes=viewpoint_stack,
-        )
-    )
-    time.sleep(2)
-
-
-
     torch.cuda.synchronize()
 
 
-    training(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    runBundleAdjustment(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
 
-    q_main2vis.put(gui_utils.GaussianPacket(finish=True))
     gui_process.join()
 
 
     sfm_gui.Log("GUI Stopped and joined the main thread")
-    
-    print("FINISHED")
+
+    time.sleep(1)

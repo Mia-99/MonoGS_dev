@@ -436,13 +436,13 @@ class SFM_GUI:
                 self.gaussian_cur.get_xyz.shape[0]
             )
             self.init = True
-            Log("add gaussians in viewer.", tag="GUI")
+            # Log("update gaussians in viewer.", tag="GUI")
 
         if gaussian_packet.current_frame is not None:
             frustum = self.add_camera(
                 gaussian_packet.current_frame, name="current", color=[0, 1, 0]
             )
-            Log("add a camera in viewer.", tag="GUI")
+            # Log("update cameras in viewer.", tag="GUI")
             if self.followcam_chbox.checked:
                 viewpoint = (
                     frustum.view_dir_behind
@@ -714,7 +714,7 @@ class SFM_GUI:
         return render_img
 
     def render_gui(self):
-        Log("render_gui:", tag="GUI")
+        # Log("render_gui", tag="GUI")
         if not self.init:
             return
         current_cam = self.get_current_cam()
@@ -729,9 +729,9 @@ class SFM_GUI:
         while True:
             time.sleep(0.01)
             self.step += 1
-            if self.process_finished:
-                o3d.visualization.gui.Application.instance.quit()
-                Log("Closing Visualization", tag="GUI")                
+            if self.process_finished: 
+                o3d.visualization.gui.Application.instance.quit()                            
+                Log("Closing Visualization", tag="GUI")
                 # break
                 return
 
