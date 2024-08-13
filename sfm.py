@@ -80,7 +80,7 @@ class SFM:
         time.sleep(1.5)
 
 
-        print("start training")
+        print("start optimization")
 
         first_iter = 0
 
@@ -140,7 +140,7 @@ class SFM:
             self.gaussians.update_learning_rate(iteration)
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
-            if iteration % 1000 == 0:
+            if iteration % 50 == 0:
                 self.gaussians.oneupSHdegree()
 
 
@@ -184,10 +184,12 @@ class SFM:
                     self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
                     if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+                        sfm_gui.Log("Densify and Prune Gaussians", tag="SFM")
                         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                         self.gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                     
                     if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
+                        sfm_gui.Log("Reset opacity of all Gaussians", tag="SFM")
                         self.gaussians.reset_opacity()
 
 
@@ -266,7 +268,18 @@ if __name__ == "__main__":
     pipe = pp.extract(args)
 
 
-    
+    print(opt.__dict__)
+
+    print(pipe.__dict__)
+
+
+
+    opt.iterations = 500
+    opt.densification_interval = 50   
+    opt.opacity_reset_interval = 2000
+    opt.densify_from_iter = 49
+    opt.densify_until_iter = 300
+    opt.densify_grad_threshold = 0.0002
 
 
 
@@ -304,10 +317,8 @@ if __name__ == "__main__":
     torch.cuda.synchronize()
 
 
-    opt.iterations = 500
     SFM(pipe, q_main2vis, q_vis2main).run(viewpoint_stack, gaussians, opt)
-    # runBundleAdjustment(gaussians, viewpoint_stack, q_main2vis, dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
-
+  
 
     gui_process.join()
 
