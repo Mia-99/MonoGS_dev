@@ -276,7 +276,7 @@ if __name__ == "__main__":
 
     opt.iterations = 500
     opt.densification_interval = 50   
-    opt.opacity_reset_interval = 2000
+    opt.opacity_reset_interval = 200
     opt.densify_from_iter = 49
     opt.densify_until_iter = 300
     opt.densify_grad_threshold = 0.0002
@@ -287,7 +287,7 @@ if __name__ == "__main__":
     scene = Scene(dataset, gaussians)
 
 
-    N = 3
+    N = 5
 
     viewpoint_stack = scene.getTrainCameras()
     while len(viewpoint_stack) > N:
