@@ -221,7 +221,7 @@ class SFM:
                         )
                     )
                     # time.sleep(0.001)
-                    print("")
+                    # print("")
 
 
         self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
@@ -286,11 +286,15 @@ if __name__ == "__main__":
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
 
-    viewpoint_stack = scene.getTrainCameras().copy()
 
     N = 3
-    viewpoint_stack = viewpoint_stack[: N]
 
+    viewpoint_stack = scene.getTrainCameras()
+    while len(viewpoint_stack) > N:
+        viewpoint_stack.pop()
+    sfm_gui.Log(f"cameras used: {len(scene.getTrainCameras())}")
+
+    viewpoint_stack = scene.getTrainCameras().copy()
 
 
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
