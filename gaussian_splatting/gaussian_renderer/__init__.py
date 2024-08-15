@@ -60,6 +60,8 @@ def render(
         image_width=int(viewpoint_camera.image_width),
         focal_x = viewpoint_camera.fx,
         focal_y = viewpoint_camera.fy,
+        principalPoint_x = viewpoint_camera.cx,
+        principalPoint_y = viewpoint_camera.cy,
         tanfovx=tanfovx,
         tanfovy=tanfovy,
         kappa = viewpoint_camera.kappa,
