@@ -54,10 +54,11 @@ except ImportError:
 
 class SFM:
 
-    def __init__(self, pipe = None, q_main2vis = None, q_vis2main = None) -> None:
+    def __init__(self, pipe = None, q_main2vis = None, q_vis2main = None, use_gui = True) -> None:
         self.pipe = pipe
         self.q_main2vis = q_main2vis
         self.q_vis2main = q_vis2main
+        self.use_gui = use_gui
 
 
     def run (self, viewpoint_stack, gaussians, opt, bg_color = [1, 1, 1]):
@@ -69,15 +70,15 @@ class SFM:
 
 
         cam_cnt = 0
-
-        self.q_main2vis.put(
-            gui_utils.GaussianPacket(
-                gaussians=self.gaussians,
-                current_frame=self.viewpoint_stack[cam_cnt],
-                keyframes=self.viewpoint_stack,
+        if self.use_gui:
+            self.q_main2vis.put(
+                gui_utils.GaussianPacket(
+                    gaussians=self.gaussians,
+                    current_frame=self.viewpoint_stack[cam_cnt],
+                    keyframes=self.viewpoint_stack,
+                )
             )
-        )
-        time.sleep(1.5)
+            time.sleep(1.5)
 
 
         print("start optimization")
@@ -207,7 +208,7 @@ class SFM:
                     self.gaussians.optimizer.zero_grad(set_to_none = True)
 
 
-                if True and iteration % 10 == 0:
+                if self.use_gui and iteration % 10 == 0:
                     cam_cnt += 1
                     cam_cnt = cam_cnt % len(self.viewpoint_stack)
                     depth = np.zeros((viewpoint_stack[0].image_height, viewpoint_stack[0].image_width))
@@ -223,12 +224,11 @@ class SFM:
                     # time.sleep(0.001)
                     # print("")
 
+        if self.use_gui:
+            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
+            time.sleep(1.0)
 
-        self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
         print("\nTraining complete.")
-        time.sleep(1.0)
-
-
 
 
 
@@ -306,25 +306,27 @@ if __name__ == "__main__":
     q_main2vis = mp.Queue() if use_gui else FakeQueue()
     q_vis2main = mp.Queue() if use_gui else FakeQueue()
 
-    bg_color = [1, 1, 1]
-    params_gui = gui_utils.ParamsGUI(
-        pipe=pipe,
-        background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
-        gaussians=GaussianModel(dataset.sh_degree),
-        q_main2vis=q_main2vis,
-        q_vis2main=q_vis2main,
-    )
-    gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
-    gui_process.start()
+
+    if use_gui:
+        bg_color = [1, 1, 1]
+        params_gui = gui_utils.ParamsGUI(
+            pipe=pipe,
+            background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
+            gaussians=GaussianModel(dataset.sh_degree),
+            q_main2vis=q_main2vis,
+            q_vis2main=q_vis2main,
+        )
+        gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
+        gui_process.start()
 
 
     torch.cuda.synchronize()
 
 
-    SFM(pipe, q_main2vis, q_vis2main).run(viewpoint_stack, gaussians, opt)
+    SFM(pipe, q_main2vis, q_vis2main, use_gui).run(viewpoint_stack, gaussians, opt)
   
 
-    gui_process.join()
+    if use_gui:
+        gui_process.join()
+        sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
 
-
-    sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")

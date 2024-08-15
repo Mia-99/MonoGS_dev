@@ -58,8 +58,11 @@ def render(
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
+        focal_x = viewpoint_camera.fx,
+        focal_y = viewpoint_camera.fy,
         tanfovx=tanfovx,
         tanfovy=tanfovy,
+        kappa = viewpoint_camera.kappa,
         bg=bg_color,
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform,
