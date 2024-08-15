@@ -133,7 +133,7 @@ class SFM:
 
 
 
-        for iteration in range(first_iter, opt.iterations):
+        for iteration in range(first_iter, opt.iterations+1):
 
 
             iter_start.record()
