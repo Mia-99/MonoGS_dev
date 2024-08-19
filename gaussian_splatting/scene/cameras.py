@@ -95,7 +95,7 @@ class Camera(nn.Module):
 
         # add self-calibration variables
         self.focal = 100
-        self.kappa = 1.0
+        self.kappa = 0.0
 
 
         self.cam_rot_delta = nn.Parameter(
