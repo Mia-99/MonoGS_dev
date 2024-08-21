@@ -59,6 +59,33 @@ class SFM:
         self.q_main2vis = q_main2vis
         self.q_vis2main = q_vis2main
         self.use_gui = use_gui
+        self.require_calibration = True
+
+
+
+    def updateCalibration(self):
+
+        focal = torch.zeros(1, device=self.viewpoint_stack[0].device)
+        kappa = torch.zeros(1, device=self.viewpoint_stack[0].device)
+
+        for viewpoint_cam in self.viewpoint_stack:
+
+            focal = focal + viewpoint_cam.cam_focal_delta
+            kappa = kappa + viewpoint_cam.cam_kappa_delta
+
+            viewpoint_cam.cam_focal_delta.data.fill_(0)
+            viewpoint_cam.cam_kappa_delta.data.fill_(0)
+
+        focal = focal.cpu().numpy()[0]
+        kappa = kappa.cpu().numpy()[0]
+
+        # print(f"calib update: focal {focal}, kappa {kappa}")
+
+        for viewpoint_cam in self.viewpoint_stack:
+            viewpoint_cam.fx = viewpoint_cam.fx + focal
+            viewpoint_cam.fy = viewpoint_cam.fy + ( viewpoint_cam.fy/viewpoint_cam.fx) * focal
+            viewpoint_cam.kappa = viewpoint_cam.kappa + kappa
+        pass
 
 
     def run (self, viewpoint_stack, gaussians, opt, bg_color = [1, 1, 1]):
@@ -68,6 +95,9 @@ class SFM:
         self.gaussians = gaussians
         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
+        print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
+        
+        
 
         cam_cnt = 0
         if self.use_gui:
@@ -128,6 +158,21 @@ class SFM:
                     "name": "exposure_b_{}".format(viewpoint_cam.uid),
                 }
             )
+            if self.require_calibration:
+                opt_params.append(
+                    {
+                        "params": [viewpoint_cam.cam_focal_delta],
+                        "lr": 0.01,
+                        "name": "calibration_f_{}".format(viewpoint_cam.uid),
+                    }
+                )
+                opt_params.append(
+                    {
+                        "params": [viewpoint_cam.cam_kappa_delta],
+                        "lr": 0.0001,
+                        "name": "calibration_k_{}".format(viewpoint_cam.uid),
+                    }
+                )            
         pose_optimizer = torch.optim.Adam(opt_params)
         pose_optimizer.zero_grad()
 
@@ -197,6 +242,8 @@ class SFM:
                 # Optimizer step
                 if iteration > 0 and iteration < opt.iterations:
                     pose_optimizer.step()
+                    if self.require_calibration:
+                        self.updateCalibration()
                     for viewpoint_cam in self.viewpoint_stack:
                         if viewpoint_cam.uid != 0:
                             update_pose(viewpoint_cam)

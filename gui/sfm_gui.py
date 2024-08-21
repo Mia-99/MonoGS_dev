@@ -465,8 +465,10 @@ class SFM_GUI:
                 )
                 self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
             # calibration parameters panel output
-            self.calib_info.text = "focal: {},   kappa: {}".format(
-                gaussian_packet.current_frame.focal, gaussian_packet.current_frame.kappa
+            self.calib_info.text = "fx: {}, \nfy: {}, \ncx: {}, cy: {}, \nkappa: {}".format(
+                gaussian_packet.current_frame.fx, gaussian_packet.current_frame.fy,
+                gaussian_packet.current_frame.cx, gaussian_packet.current_frame.cy,
+                gaussian_packet.current_frame.kappa
             )
 
 

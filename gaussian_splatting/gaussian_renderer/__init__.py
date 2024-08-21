@@ -130,6 +130,8 @@ def render(
             cov3D_precomp=cov3D_precomp[mask] if cov3D_precomp is not None else None,
             theta=viewpoint_camera.cam_rot_delta,
             rho=viewpoint_camera.cam_trans_delta,
+            focal=viewpoint_camera.cam_focal_delta,
+            kappa=viewpoint_camera.cam_kappa_delta,
         )
     else:
         rendered_image, radii, depth, opacity, n_touched = rasterizer(
@@ -143,6 +145,8 @@ def render(
             cov3D_precomp=cov3D_precomp,
             theta=viewpoint_camera.cam_rot_delta,
             rho=viewpoint_camera.cam_trans_delta,
+            focal=viewpoint_camera.cam_focal_delta,
+            kappa=viewpoint_camera.cam_kappa_delta,
         )
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.

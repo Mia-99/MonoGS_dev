@@ -92,10 +92,9 @@ class Camera(nn.Module):
         self.cx = (self.image_width - 1) * 0.5
         self.cy = (self.image_height - 1) * 0.5
 
-
-        # add self-calibration variables
-        self.focal = 100
+        # first-order radial distortion
         self.kappa = 0.0
+
 
 
         self.cam_rot_delta = nn.Parameter(
@@ -112,6 +111,12 @@ class Camera(nn.Module):
             torch.tensor([0.0], requires_grad=True, device=data_device)
         )
 
+        self.cam_focal_delta = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=data_device)
+        )
+        self.cam_kappa_delta = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=data_device)
+        )
 
 
     @property
