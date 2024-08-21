@@ -79,12 +79,15 @@ class SFM:
         focal = focal.cpu().numpy()[0]
         kappa = kappa.cpu().numpy()[0]
 
+        print(f"update focal = {focal}, update kappa = {kappa}")
+
         # print(f"calib update: focal {focal}, kappa {kappa}")
 
         for viewpoint_cam in self.viewpoint_stack:
             viewpoint_cam.fx = viewpoint_cam.fx + focal
-            viewpoint_cam.fy = viewpoint_cam.fy + ( viewpoint_cam.fy/viewpoint_cam.fx) * focal
+            viewpoint_cam.fy = viewpoint_cam.fy + viewpoint_cam.aspect_ratio * focal
             viewpoint_cam.kappa = viewpoint_cam.kappa + kappa
+
         pass
 
 
@@ -162,14 +165,14 @@ class SFM:
                 opt_params.append(
                     {
                         "params": [viewpoint_cam.cam_focal_delta],
-                        "lr": 0.01,
+                        "lr": 0.100,
                         "name": "calibration_f_{}".format(viewpoint_cam.uid),
                     }
                 )
                 opt_params.append(
                     {
                         "params": [viewpoint_cam.cam_kappa_delta],
-                        "lr": 0.0001,
+                        "lr": 0.01,
                         "name": "calibration_k_{}".format(viewpoint_cam.uid),
                     }
                 )            
@@ -321,11 +324,11 @@ if __name__ == "__main__":
 
 
 
-    opt.iterations = 500
-    opt.densification_interval = 50   
+    opt.iterations = 1000
+    opt.densification_interval = 50
     opt.opacity_reset_interval = 200
     opt.densify_from_iter = 49
-    opt.densify_until_iter = 300
+    opt.densify_until_iter = 3000
     opt.densify_grad_threshold = 0.0002
 
 
@@ -334,7 +337,7 @@ if __name__ == "__main__":
     scene = Scene(dataset, gaussians)
 
 
-    N = 5
+    N = 3
 
     viewpoint_stack = scene.getTrainCameras()
     while len(viewpoint_stack) > N:
@@ -342,6 +345,13 @@ if __name__ == "__main__":
     sfm_gui.Log(f"cameras used: {len(scene.getTrainCameras())}")
 
     viewpoint_stack = scene.getTrainCameras().copy()
+
+    # for viewpoint_cam in viewpoint_stack:
+    #     focal = 800
+    #     viewpoint_cam.fx = focal
+    #     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
+    #     viewpoint_cam.kappa = 0.1
+
 
 
     torch.autograd.set_detect_anomaly(args.detect_anomaly)

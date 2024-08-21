@@ -88,6 +88,8 @@ class Camera(nn.Module):
         self.fx = fov2focal(self.FoVx, self.image_width)
         self.fy = fov2focal(self.FoVy, self.image_height)
 
+        self.aspect_ratio = self.fy / self.fx
+
         # approximate for now
         self.cx = (self.image_width - 1) * 0.5
         self.cy = (self.image_height - 1) * 0.5
@@ -95,6 +97,9 @@ class Camera(nn.Module):
         # first-order radial distortion
         self.kappa = 0.0
 
+        self.fx_init = self.fx
+        self.fy_init = self.fy
+        self.kappa_init = self.kappa
 
 
         self.cam_rot_delta = nn.Parameter(
