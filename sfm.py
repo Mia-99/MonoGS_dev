@@ -165,28 +165,51 @@ class SFM:
                 opt_params.append(
                     {
                         "params": [viewpoint_cam.cam_focal_delta],
-                        "lr": 0.100,
+                        "lr": 1.0,
                         "name": "calibration_f_{}".format(viewpoint_cam.uid),
                     }
                 )
-                opt_params.append(
-                    {
-                        "params": [viewpoint_cam.cam_kappa_delta],
-                        "lr": 0.01,
-                        "name": "calibration_k_{}".format(viewpoint_cam.uid),
-                    }
-                )            
+                # opt_params.append(
+                #     {
+                #         "params": [viewpoint_cam.cam_kappa_delta],
+                #         "lr": 0.01,
+                #         "name": "calibration_k_{}".format(viewpoint_cam.uid),
+                #     }
+                # )            
         pose_optimizer = torch.optim.Adam(opt_params)
         pose_optimizer.zero_grad()
 
 
 
         for iteration in range(first_iter, opt.iterations+1):
+            
+
+            if iteration == 100:
+                for viewpoint_cam in self.viewpoint_stack:
+                    focal = 650
+                    viewpoint_cam.fx = focal
+                    viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
+                    viewpoint_cam.kappa = 0.0
+                for param_group in pose_optimizer.param_groups:
+                    if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] = 10
 
 
             iter_start.record()
 
             self.gaussians.update_learning_rate(iteration)
+
+
+            if iteration == 200:
+                for param_group in pose_optimizer.param_groups:
+                    if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] *= 0.1
+            if iteration == 300:
+                for param_group in pose_optimizer.param_groups:
+                    if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] *= 0.1
+
+
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
             if iteration % 50 == 0:
@@ -201,15 +224,29 @@ class SFM:
 
                 viewpoint_cam = self.viewpoint_stack[k]
 
-                render_pkg = render(viewpoint_cam, self.gaussians, self.pipe, bg)
+                render_pkg = render(viewpoint_cam, self.gaussians, self.pipe, bg,
+                                    scaling_modifier=1.0,
+                                    override_color=None,
+                                    mask=None,)
 
-                image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+                image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]
+
 
                 # Loss
                 gt_image = viewpoint_cam.original_image.cuda()
-                Ll1 = l1_loss(image, gt_image)
 
-                loss = loss + (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))    
+                mask = opacity
+                Ll1 = l1_loss(image*mask, gt_image*mask)
+
+                # print(f"image = {image.shape}, {image}")
+                # print(f"gt_image = {gt_image.shape}, {gt_image}")
+                # print(f"opacity = {opacity.shape}, {opacity}")                
+                # print(f"viewspace_point_tensor = {viewspace_point_tensor.shape}, {viewspace_point_tensor}")
+                # print(f"visibility_filter = {visibility_filter.shape}, {visibility_filter}")
+                # print(f"radii = {radii.shape}, {radii}")
+                # print(f"n_touched = {n_touched.shape}, {n_touched}")
+
+                loss = loss + (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))    
         
             loss.backward()
 
@@ -245,7 +282,7 @@ class SFM:
                 # Optimizer step
                 if iteration > 0 and iteration < opt.iterations:
                     pose_optimizer.step()
-                    if self.require_calibration:
+                    if self.require_calibration and iteration > 50:
                         self.updateCalibration()
                     for viewpoint_cam in self.viewpoint_stack:
                         if viewpoint_cam.uid != 0:
@@ -326,7 +363,7 @@ if __name__ == "__main__":
 
     opt.iterations = 1000
     opt.densification_interval = 50
-    opt.opacity_reset_interval = 200
+    opt.opacity_reset_interval = 300
     opt.densify_from_iter = 49
     opt.densify_until_iter = 3000
     opt.densify_grad_threshold = 0.0002
@@ -346,11 +383,7 @@ if __name__ == "__main__":
 
     viewpoint_stack = scene.getTrainCameras().copy()
 
-    # for viewpoint_cam in viewpoint_stack:
-    #     focal = 800
-    #     viewpoint_cam.fx = focal
-    #     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
-    #     viewpoint_cam.kappa = 0.1
+
 
 
 
