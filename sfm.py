@@ -157,13 +157,13 @@ class SFM:
                         "name": "calibration_f_{}".format(viewpoint_cam.uid),
                     }
                 )
-                # opt_params.append(
-                #     {
-                #         "params": [viewpoint_cam.cam_kappa_delta],
-                #         "lr": 0.01,
-                #         "name": "calibration_k_{}".format(viewpoint_cam.uid),
-                #     }
-                # )
+                opt_params.append(
+                    {
+                        "params": [viewpoint_cam.cam_kappa_delta],
+                        "lr": 0.0001,
+                        "name": "calibration_k_{}".format(viewpoint_cam.uid),
+                    }
+                )
         pose_optimizer = torch.optim.Adam(opt_params)
         pose_optimizer.zero_grad()
 
@@ -213,6 +213,8 @@ class SFM:
             if iteration == self.add_calib_noise_iter + 300:
                 for param_group in pose_optimizer.param_groups:
                     if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] *= 0.1
+                    if "calibration_k_" in param_group["name"]:
                         param_group["lr"] *= 0.1
 
 
@@ -388,7 +390,7 @@ if __name__ == "__main__":
     scene = Scene(dataset, gaussians)
 
 
-    N = 2
+    N = 3
 
     viewpoint_stack = scene.getTrainCameras()
     while len(viewpoint_stack) > N:
