@@ -186,8 +186,7 @@ class SFM:
                         param_group["lr"] = 10.0
 
                 if self.use_gui:
-                    cam_cnt += 1
-                    cam_cnt = cam_cnt % len(self.viewpoint_stack)
+                    cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
                     depth = np.zeros((viewpoint_stack[0].image_height, viewpoint_stack[0].image_width))
                     q_main2vis.put(
                         gui_utils.GaussianPacket(
@@ -230,8 +229,8 @@ class SFM:
 
             bg = torch.rand((3), device="cuda") if opt.random_background else self.background
 
-            loss = 0.0
 
+            loss = 0.0
             for k in range(len(self.viewpoint_stack)):
 
                 viewpoint_cam = self.viewpoint_stack[k]
@@ -241,8 +240,10 @@ class SFM:
                                     override_color=None,
                                     mask=None,)
 
-                image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]
+                image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]                   
 
+                if self.use_gui and iteration % 10 == 0 and k == (cam_cnt+1) % len(self.viewpoint_stack):
+                    depth = opacity.squeeze().cpu().detach().numpy()
 
                 # Loss
                 gt_image = viewpoint_cam.original_image.cuda()
@@ -259,8 +260,6 @@ class SFM:
                 # print(f"n_touched = {n_touched.shape}, {n_touched}")
 
                 loss = loss + (1.0 - opt.lambda_dssim) * Ll1  + opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
-
-
         
             loss.backward()
 
@@ -310,9 +309,8 @@ class SFM:
 
 
                 if self.use_gui and iteration % 10 == 0:
-                    cam_cnt += 1
-                    cam_cnt = cam_cnt % len(self.viewpoint_stack)
-                    depth = np.zeros((viewpoint_stack[0].image_height, viewpoint_stack[0].image_width))
+                    # depth = np.zeros((viewpoint_stack[0].image_height, viewpoint_stack[0].image_width))
+                    cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
                     q_main2vis.put(
                         gui_utils.GaussianPacket(
                             gaussians=self.gaussians,  #clone_obj(gaussians)
@@ -324,6 +322,8 @@ class SFM:
                     )
                     # time.sleep(0.001)
                     # print("")
+                    
+
 
         if self.use_gui:
             self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
