@@ -177,7 +177,7 @@ class SFM:
 
             if iteration == self.add_calib_noise_iter:
                 for viewpoint_cam in self.viewpoint_stack:
-                    focal = 400
+                    focal = 650
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
@@ -259,7 +259,7 @@ class SFM:
                 # print(f"radii = {radii.shape}, {radii}")
                 # print(f"n_touched = {n_touched.shape}, {n_touched}")
 
-                loss = loss + (1.0 - opt.lambda_dssim) * Ll1  + opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
+                loss = loss + (1.0 - opt.lambda_dssim) * Ll1  # + opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
 
@@ -388,7 +388,7 @@ if __name__ == "__main__":
     scene = Scene(dataset, gaussians)
 
 
-    N = 3
+    N = 2
 
     viewpoint_stack = scene.getTrainCameras()
     while len(viewpoint_stack) > N:
