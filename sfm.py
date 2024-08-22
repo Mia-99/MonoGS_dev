@@ -59,8 +59,10 @@ class SFM:
         self.q_main2vis = q_main2vis
         self.q_vis2main = q_vis2main
         self.use_gui = use_gui
+
         self.require_calibration = True
 
+        self.add_calib_noise_iter = 200
 
 
     def updateCalibration(self):
@@ -147,20 +149,6 @@ class SFM:
                     "name": "trans_{}".format(viewpoint_cam.uid),
                 }
             )
-            opt_params.append(
-                {
-                    "params": [viewpoint_cam.exposure_a],
-                    "lr": 0.01,
-                    "name": "exposure_a_{}".format(viewpoint_cam.uid),
-                }
-            )
-            opt_params.append(
-                {
-                    "params": [viewpoint_cam.exposure_b],
-                    "lr": 0.01,
-                    "name": "exposure_b_{}".format(viewpoint_cam.uid),
-                }
-            )
             if self.require_calibration:
                 opt_params.append(
                     {
@@ -175,7 +163,7 @@ class SFM:
                 #         "lr": 0.01,
                 #         "name": "calibration_k_{}".format(viewpoint_cam.uid),
                 #     }
-                # )            
+                # )
         pose_optimizer = torch.optim.Adam(opt_params)
         pose_optimizer.zero_grad()
 
@@ -183,36 +171,60 @@ class SFM:
 
         for iteration in range(first_iter, opt.iterations+1):
             
+            iter_start.record()
 
-            if iteration == 100:
+
+
+            if iteration == self.add_calib_noise_iter:
                 for viewpoint_cam in self.viewpoint_stack:
-                    focal = 650
+                    focal = 400
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
                 for param_group in pose_optimizer.param_groups:
                     if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] = 10
+                        param_group["lr"] = 10.0
+
+                if self.use_gui:
+                    cam_cnt += 1
+                    cam_cnt = cam_cnt % len(self.viewpoint_stack)
+                    depth = np.zeros((viewpoint_stack[0].image_height, viewpoint_stack[0].image_width))
+                    q_main2vis.put(
+                        gui_utils.GaussianPacket(
+                            gaussians=self.gaussians,  #clone_obj(gaussians)
+                            keyframes=self.viewpoint_stack,
+                            current_frame=self.viewpoint_stack[cam_cnt],
+                            gtcolor=self.viewpoint_stack[cam_cnt].original_image,
+                            gtdepth=depth,
+                        )
+                    )
+                time.sleep(2)
 
 
-            iter_start.record()
+ 
+            # upapte learning rate for calibration parameters
+            if iteration == self.add_calib_noise_iter + 100:
+                for param_group in pose_optimizer.param_groups:
+                    if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] *= 0.1
+            if iteration == self.add_calib_noise_iter + 200:
+                for param_group in pose_optimizer.param_groups:
+                    if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] *= 0.1
+            if iteration == self.add_calib_noise_iter + 300:
+                for param_group in pose_optimizer.param_groups:
+                    if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] *= 0.1
+
+
+
+
 
             self.gaussians.update_learning_rate(iteration)
 
 
-            if iteration == 200:
-                for param_group in pose_optimizer.param_groups:
-                    if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] *= 0.1
-            if iteration == 300:
-                for param_group in pose_optimizer.param_groups:
-                    if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] *= 0.1
-
-
-
             # Every 1000 its we increase the levels of SH up to a maximum degree
-            if iteration % 50 == 0:
+            if iteration % 500 == 0:
                 self.gaussians.oneupSHdegree()
 
 
@@ -240,13 +252,15 @@ class SFM:
 
                 # print(f"image = {image.shape}, {image}")
                 # print(f"gt_image = {gt_image.shape}, {gt_image}")
-                # print(f"opacity = {opacity.shape}, {opacity}")                
+                # print(f"opacity = {opacity.shape}, {opacity}")      
                 # print(f"viewspace_point_tensor = {viewspace_point_tensor.shape}, {viewspace_point_tensor}")
                 # print(f"visibility_filter = {visibility_filter.shape}, {visibility_filter}")
                 # print(f"radii = {radii.shape}, {radii}")
                 # print(f"n_touched = {n_touched.shape}, {n_touched}")
 
-                loss = loss + (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))    
+                loss = loss + (1.0 - opt.lambda_dssim) * Ll1  + opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
+
+
         
             loss.backward()
 
@@ -282,7 +296,7 @@ class SFM:
                 # Optimizer step
                 if iteration > 0 and iteration < opt.iterations:
                     pose_optimizer.step()
-                    if self.require_calibration and iteration > 50:
+                    if self.require_calibration and iteration >= self.add_calib_noise_iter:
                         self.updateCalibration()
                     for viewpoint_cam in self.viewpoint_stack:
                         if viewpoint_cam.uid != 0:
@@ -363,7 +377,7 @@ if __name__ == "__main__":
 
     opt.iterations = 1000
     opt.densification_interval = 50
-    opt.opacity_reset_interval = 300
+    opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
     opt.densify_until_iter = 3000
     opt.densify_grad_threshold = 0.0002
