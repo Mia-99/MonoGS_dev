@@ -43,6 +43,7 @@ class Camera(nn.Module):
         self.cy = cy
         self.FoVx = fovx
         self.FoVy = fovy
+        self.kappa = 0.0
         self.image_height = image_height
         self.image_width = image_width
 
@@ -57,6 +58,13 @@ class Camera(nn.Module):
             torch.tensor([0.0], requires_grad=True, device=device)
         )
         self.exposure_b = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=device)
+        )
+
+        self.cam_focal_delta = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=device)
+        )
+        self.cam_kappa_delta = nn.Parameter(
             torch.tensor([0.0], requires_grad=True, device=device)
         )
 

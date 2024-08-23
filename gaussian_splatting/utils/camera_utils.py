@@ -39,17 +39,47 @@ def loadCam(args, id, cam_info, resolution_scale):
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
-
+    
     gt_image = resized_image_rgb[:3, ...]
     loaded_mask = None
 
     if resized_image_rgb.shape[1] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
 
-    return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
-                  FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
-                  image=gt_image, gt_alpha_mask=loaded_mask,
-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
+    image_width = gt_image.shape[2]
+    image_height = gt_image.shape[1]
+    scale_x = image_width / cam_info.width 
+    scale_y = image_height / cam_info.height
+    fx = cam_info.fx * scale_x
+    fy = cam_info.fy * scale_y
+    cx = cam_info.cx * scale_x
+    cy = cam_info.cy * scale_y
+    # return Camera.init_from_fov(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
+    #               FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
+    #               image=gt_image, gt_alpha_mask=loaded_mask,
+    #               image_name=cam_info.image_name, uid=id, data_device=args.data_device)
+    return Camera(
+            uid = cam_info.uid,
+            color = gt_image,
+            depth = None,
+            image_height = image_height,
+            image_width = image_width,
+            R = cam_info.R, T = cam_info.T, 
+            fx = fx,
+            fy = fy,
+            cx = cx,
+            cy = cy,
+            fovx = cam_info.FovX,
+            fovy = cam_info.FovY,
+            kappa = 0.0,
+            trans = np.array([0.0, 0.0, 0.0]),
+            scale = 1.0,
+            gt_alpha_mask = loaded_mask,
+            device=args.data_device,
+    )
+
+
+
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

@@ -61,6 +61,7 @@ class SFM:
         self.use_gui = use_gui
 
         self.require_calibration = True
+        self.allow_lens_distortion = True        
 
         self.add_calib_noise_iter = 200
 
@@ -81,8 +82,6 @@ class SFM:
         focal = focal.cpu().numpy()[0]
         kappa = kappa.cpu().numpy()[0]
 
-        print(f"update focal = {focal}, update kappa = {kappa}")
-
         # print(f"calib update: focal {focal}, kappa {kappa}")
 
         for viewpoint_cam in self.viewpoint_stack:
@@ -90,7 +89,6 @@ class SFM:
             viewpoint_cam.fy = viewpoint_cam.fy + viewpoint_cam.aspect_ratio * focal
             viewpoint_cam.kappa = viewpoint_cam.kappa + kappa
 
-        pass
 
 
     def run (self, viewpoint_stack, gaussians, opt, bg_color = [1, 1, 1]):
@@ -157,13 +155,14 @@ class SFM:
                         "name": "calibration_f_{}".format(viewpoint_cam.uid),
                     }
                 )
-                opt_params.append(
-                    {
-                        "params": [viewpoint_cam.cam_kappa_delta],
-                        "lr": 0.0001,
-                        "name": "calibration_k_{}".format(viewpoint_cam.uid),
-                    }
-                )
+                if self.allow_lens_distortion:
+                    opt_params.append(
+                        {
+                            "params": [viewpoint_cam.cam_kappa_delta],
+                            "lr": 0.0001,
+                            "name": "calibration_k_{}".format(viewpoint_cam.uid),
+                        }
+                    )
         pose_optimizer = torch.optim.Adam(opt_params)
         pose_optimizer.zero_grad()
 
@@ -197,7 +196,7 @@ class SFM:
                             gtdepth=depth,
                         )
                     )
-                time.sleep(2)
+                    time.sleep(0.001)
 
 
  
@@ -322,16 +321,15 @@ class SFM:
                             gtdepth=depth,
                         )
                     )
-                    # time.sleep(0.001)
-                    # print("")
+                    time.sleep(0.001)
                     
-
+        print("\nTraining complete.")
 
         if self.use_gui:
             self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
-            time.sleep(1.0)
+            time.sleep(3.0)
 
-        print("\nTraining complete.")
+
 
 
 
@@ -424,6 +422,7 @@ if __name__ == "__main__":
         )
         gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
         gui_process.start()
+        time.sleep(3)
 
 
     torch.cuda.synchronize()

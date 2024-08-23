@@ -34,6 +34,10 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
+    fx: np.array
+    fy: np.array
+    cx: np.array
+    cy: np.array
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -77,6 +81,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         intr = cam_intrinsics[extr.camera_id]
         height = intr.height
         width = intr.width
+        # print(f"intr = {intr}")
 
         uid = intr.id
         R = np.transpose(qvec2rotmat(extr.qvec))
@@ -91,6 +96,9 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
             focal_length_y = intr.params[1]
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
+            principal_point_x = intr.params[2]
+            principal_point_y = intr.params[3]
+
         else:
             assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
@@ -99,8 +107,10 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         image = Image.open(image_path)
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                              image_path=image_path, image_name=image_name, width=width, height=height)
+                              image_path=image_path, image_name=image_name, width=width, height=height,
+                              fx=focal_length_x, fy=focal_length_y, cx=principal_point_x, cy=principal_point_y)
         cam_infos.append(cam_info)
+
     sys.stdout.write('\n')
     return cam_infos
 
