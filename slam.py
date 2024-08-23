@@ -21,9 +21,18 @@ from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
 from utils.slam_frontend import FrontEnd
 
+from typing import NamedTuple
+
+
+class OnlineCalibrationSettings:
+    def __init__ (self):
+        self.require_calibration = True
+        self.allow_lens_distortion = True
+
+
 
 class SLAM:
-    def __init__(self, config, save_dir=None):
+    def __init__(self, config, save_dir=None, calib_opts=OnlineCalibrationSettings()):
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
 
@@ -89,6 +98,9 @@ class SLAM:
         self.backend.frontend_queue = frontend_queue
         self.backend.backend_queue = backend_queue
         self.backend.live_mode = self.live_mode
+        # online calibration control
+        self.backend.require_calibration = calib_opts.require_calibration
+        self.backend.allow_lens_distortion = calib_opts.allow_lens_distortion
 
         self.backend.set_hyperparams()
 
@@ -198,6 +210,10 @@ class SLAM:
         pass
 
 
+
+
+
+
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -249,7 +265,10 @@ if __name__ == "__main__":
         wandb.define_metric("frame_idx")
         wandb.define_metric("ate*", step_metric="frame_idx")
 
-    slam = SLAM(config, save_dir=save_dir)
+
+    calib_opts = OnlineCalibrationSettings()
+
+    slam = SLAM(config, save_dir=save_dir, calib_opts=calib_opts)
 
     slam.run()
     wandb.finish()

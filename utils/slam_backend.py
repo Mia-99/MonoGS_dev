@@ -39,8 +39,8 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
 
         # calibration control params
-        self.require_calibration = True
-        self.allow_lens_distortion = True
+        self.require_calibration = False
+        self.allow_lens_distortion = False
 
 
     def set_hyperparams(self):
@@ -497,7 +497,7 @@ class BackEnd(mp.Process):
                                     opt_params.append(
                                         {
                                             "params": [viewpoint.cam_kappa_delta],
-                                            "lr": 0.0001,
+                                            "lr": 0.00001,
                                             "name": "calibration_k_{}".format(viewpoint.uid),
                                         }
                                     )
