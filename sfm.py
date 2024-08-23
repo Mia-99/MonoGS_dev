@@ -29,7 +29,7 @@ import torch.multiprocessing as mp
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.scene import Scene
-from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
+from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.general_utils import safe_state
 from gaussian_splatting.utils.image_utils import psnr
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
@@ -282,7 +282,7 @@ class SFM(mp.Process):
                     progress_bar.close()
 
                 # Densification
-                if True and iteration < self.opt.densify_until_iter:
+                if False and iteration < self.opt.densify_until_iter:
                     # Keep track of max radii in image-space for pruning
                     self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                     self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
