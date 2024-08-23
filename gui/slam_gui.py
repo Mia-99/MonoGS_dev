@@ -209,6 +209,8 @@ class SLAM_GUI:
         tabs = gui.TabControl()
 
         tab_info = gui.Vert(0, tab_margins)
+        self.calib_info = gui.Label("Calibration: ")
+        tab_info.add_child(self.calib_info)        
         self.output_info = gui.Label("Number of Gaussians: ")
         tab_info.add_child(self.output_info)
 
@@ -413,6 +415,16 @@ class SLAM_GUI:
                     else frustum.view_dir
                 )
                 self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
+
+            # calibration parameters panel output
+            self.calib_info.text = "fx: {:.3f},            \tinit: {:.3f}\nfy: {:.3f},            \tinit: {:.3f}\ncx: {:.3f}, \ncy: {:.3f}, \nkappa: {:.6f}, \tinit: {:.6f}".format(
+                gaussian_packet.current_frame.fx, gaussian_packet.current_frame.fx_init,
+                gaussian_packet.current_frame.fy, gaussian_packet.current_frame.fy_init,
+                gaussian_packet.current_frame.cx, 
+                gaussian_packet.current_frame.cy,
+                gaussian_packet.current_frame.kappa, gaussian_packet.current_frame.kappa_init,
+            )
+
 
         if gaussian_packet.keyframe is not None:
             name = "keyframe_{}".format(gaussian_packet.keyframe.uid)

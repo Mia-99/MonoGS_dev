@@ -305,13 +305,23 @@ class FrontEnd(mp.Process):
         keyframes = data[3]
         self.occ_aware_visibility = occ_aware_visibility
 
-        for kf_id, kf_R, kf_T in keyframes:
+        for kf_id, kf_R, kf_T, kf_fx, kf_fy, kf_kappa in keyframes:
             self.cameras[kf_id].update_RT(kf_R.clone(), kf_T.clone())
+            # update camera calibration
+            self.updateCalibration(self.cameras[kf_id], kf_fx, kf_fy, kf_kappa)
+
+    @staticmethod
+    def updateCalibration(viewpoint_cam, fx, fy, kappa):
+        viewpoint_cam.fx = fx
+        viewpoint_cam.fy = fy
+        viewpoint_cam.kappa = kappa
+
 
     def cleanup(self, cur_frame_idx):
         self.cameras[cur_frame_idx].clean()
         if cur_frame_idx % 10 == 0:
             torch.cuda.empty_cache()
+
 
     def run(self):
         cur_frame_idx = 0
@@ -375,6 +385,14 @@ class FrontEnd(mp.Process):
                     self.dataset, cur_frame_idx, projection_matrix
                 )
                 viewpoint.compute_grad_mask(self.config)
+
+                # copy the last calibration to current viewpoint
+                if len(self.current_window):
+                    last_frame_idx = self.current_window[-1]
+                    fx = self.cameras[last_frame_idx].fx
+                    fy = self.cameras[last_frame_idx].fy
+                    kappa = self.cameras[last_frame_idx].kappa
+                    self.updateCalibration (viewpoint, fx, fy, kappa)
 
                 self.cameras[cur_frame_idx] = viewpoint
 

@@ -12,7 +12,7 @@ class Camera(nn.Module):
         color,
         depth,
         gt_T,
-        projection_matrix,
+        # projection_matrix,
         fx,
         fy,
         cx,
@@ -37,6 +37,9 @@ class Camera(nn.Module):
         self.depth = depth
         self.grad_mask = None
 
+        self.zfar = 100.0
+        self.znear = 0.01
+
         self.fx = fx
         self.fy = fy
         self.cx = cx
@@ -44,8 +47,14 @@ class Camera(nn.Module):
         self.FoVx = fovx
         self.FoVy = fovy
         self.kappa = 0.0
+        self.aspect_ratio = self.fy / self.fx
+
         self.image_height = image_height
         self.image_width = image_width
+
+        self.fx_init = self.fx
+        self.fy_init = self.fy
+        self.kappa_init = self.kappa
 
         self.cam_rot_delta = nn.Parameter(
             torch.zeros(3, requires_grad=True, device=device)
@@ -68,7 +77,7 @@ class Camera(nn.Module):
             torch.tensor([0.0], requires_grad=True, device=device)
         )
 
-        self.projection_matrix = projection_matrix.to(device=device)
+        # self.projection_matrix = self.projection_matrix.to(device=device)
 
     @staticmethod
     def init_from_dataset(dataset, idx, projection_matrix):
@@ -78,7 +87,7 @@ class Camera(nn.Module):
             gt_color,
             gt_depth,
             gt_pose,
-            projection_matrix,
+            # projection_matrix,
             dataset.fx,
             dataset.fy,
             dataset.cx,
@@ -92,12 +101,26 @@ class Camera(nn.Module):
 
     @staticmethod
     def init_from_gui(uid, T, FoVx, FoVy, fx, fy, cx, cy, H, W):
-        projection_matrix = getProjectionMatrix2(
-            znear=0.01, zfar=100.0, fx=fx, fy=fy, cx=cx, cy=cy, W=W, H=H
-        ).transpose(0, 1)
+        # projection_matrix = getProjectionMatrix2(
+        #     znear=0.01, zfar=100.0, fx=fx, fy=fy, cx=cx, cy=cy, W=W, H=H
+        # ).transpose(0, 1)
         return Camera(
-            uid, None, None, T, projection_matrix, fx, fy, cx, cy, FoVx, FoVy, H, W
+            uid, None, None, T, fx, fy, cx, cy, FoVx, FoVy, H, W
         )
+
+    @property
+    def projection_matrix(self):
+        return getProjectionMatrix2(
+                    znear=self.znear,
+                    zfar=self.zfar,
+                    fx=self.fx,
+                    fy=self.fy,
+                    cx=self.cx,
+                    cy=self.cy,
+                    W=self.image_width,
+                    H=self.image_height,
+                ).transpose(0, 1).to(device=self.device)
+        # return getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(device=self.device)
 
     @property
     def world_view_transform(self):
