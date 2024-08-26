@@ -267,6 +267,9 @@ if __name__ == "__main__":
 
 
     calib_opts = OnlineCalibrationSettings()
+    # adjust controlo params
+    calib_opts.allow_lens_distortion = False  # activated only when require_calibration = True
+    calib_opts.require_calibration = False
 
     slam = SLAM(config, save_dir=save_dir, calib_opts=calib_opts)
 
