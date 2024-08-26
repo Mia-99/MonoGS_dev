@@ -214,6 +214,7 @@ class SFM(mp.Process):
                         )
                     )
                     time.sleep(0.001)
+                time.sleep(3)
 
 
  
