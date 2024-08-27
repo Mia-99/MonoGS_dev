@@ -42,6 +42,12 @@ from gui import gui_utils, sfm_gui
 from utils.multiprocessing_utils import FakeQueue, clone_obj
 
 
+from submodules.DepthAnythingV2.depth_anything_v2.dpt import DepthAnythingV2
+import cv2
+import matplotlib
+import PIL
+
+
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -49,6 +55,37 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
+
+
+class DepthAnything:
+
+    def __init__(self, encoder = 'vitb') -> None:
+        # encoder = 'vitb' # or 'vits', 'vitb', 'vitg'
+
+        self.model_configs = {
+            'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+            'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
+            'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
+            'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
+                }
+
+        self.model = DepthAnythingV2(**self.model_configs[encoder])
+        self.model.load_state_dict(torch.load(f'submodules/DepthAnythingV2/checkpoints/depth_anything_v2_{encoder}.pth', map_location='cpu'))
+        self.model = self.model.to('cuda').eval()
+
+    def eval(self, raw_img):
+        depth = self.model.infer_image(raw_img) # HxW raw depth map in numpy
+        return depth
+    
+    @staticmethod
+    # candidate colormaps: 'nipy_spectral', 'Spectral_r', 'turbo', 'plasma'
+    def depth2image (depth, colormap=None):
+        depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+        depth = depth.astype(np.uint8)
+        if colormap is not None:
+            cmap = matplotlib.colormaps.get_cmap(colormap)
+            depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+        return depth
 
 
 
@@ -75,6 +112,9 @@ class SFM(mp.Process):
         self.add_calib_noise_iter = 200
 
         self.cameras_extent = cameras_extent
+
+        self.depth_anything = DepthAnything()
+
 
 
     def updateCalibration(self):
@@ -317,6 +357,15 @@ class SFM(mp.Process):
                 if self.use_gui and iteration % 10 == 0:
                     # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+
+                    img = self.viewpoint_stack[cam_cnt].original_image.cpu().squeeze(0).numpy()
+                    # convert (3, H, W)  --- > (H, W, 3)
+                    # coorect color order BGR2RGB
+                    cv_img = img.transpose(1, 2, 0)
+                    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+                    # use depth prediction from a Neural network                    
+                    depth = self.depth_anything.eval(cv_img)
+
                     self.q_main2vis.put(
                         gui_utils.GaussianPacket(
                             gaussians=self.gaussians,
@@ -333,7 +382,6 @@ class SFM(mp.Process):
         if self.use_gui:
             self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
             time.sleep(3.0)
-
 
 
 

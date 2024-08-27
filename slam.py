@@ -23,6 +23,12 @@ from utils.slam_frontend import FrontEnd
 
 from typing import NamedTuple
 
+import random
+import numpy as np
+
+
+
+
 
 class OnlineCalibrationSettings:
     def __init__ (self):
@@ -215,6 +221,12 @@ class SLAM:
 
 
 if __name__ == "__main__":
+
+    random.seed(0)
+    np.random.seed(0)
+    # torch.manual_seed(0)
+
+
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
     parser.add_argument("--config", type=str)
@@ -268,8 +280,9 @@ if __name__ == "__main__":
 
     calib_opts = OnlineCalibrationSettings()
     # adjust controlo params
-    calib_opts.allow_lens_distortion = False  # activated only when require_calibration = True
     calib_opts.require_calibration = False
+    calib_opts.allow_lens_distortion = True  # activated only when require_calibration = True
+
 
     slam = SLAM(config, save_dir=save_dir, calib_opts=calib_opts)
 
