@@ -33,6 +33,8 @@ from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.general_utils import safe_state
 from gaussian_splatting.utils.image_utils import psnr
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
+from gaussian_splatting.utils.graphics_utils import BasicPointCloud
+
 
 
 from utils.pose_utils import update_pose
@@ -99,7 +101,9 @@ class DepthAnything:
 class ColMap:
 
     def __init__ (self, image_dir = None):
+
         self.reconstruction = None
+        
         if image_dir is not None:
             self.run(image_dir)
 
@@ -118,12 +122,69 @@ class ColMap:
         maps = pycolmap.incremental_mapping(database_path, image_dir, output_path)
 
         self.reconstruction = maps[0]
+
         self.reconstruction.write(output_path)
+        # self.reconstruction.write_text(output_path )  # text format
+        # self.reconstruction.export_PLY(output_path / "rec.ply")  # PLY format
+        print(self.reconstruction.summary())
 
 
+    # The reconstructed pose of an image is specified as 
+    # the projection from world to the camera coordinate system of an image using
+    # a quaternion (QW, QX, QY, QZ) and a translation vector (TX, TY, TZ).
+    # The coordinates of the projection/camera center are given by -R^t * T
+    # The local camera coordinate system of an image is defined in a way that:
+    #   * the X axis points to the right,
+    #   * the Y axis to the bottom,
+    #   * the Z axis to the front as seen from the image.
+    # Bring a world point X_world to camera frame
+    # X_cam = R * X_world  +  t
+    def getCamPoses(self):
+        pose_stack = {}
+        for image_id, image in self.reconstruction.images.items():
+            pose = image.cam_from_world
+            qvec = pose.rotation.quat
+            tvec = pose.translation
+            # [ R, T ] is a tranformation from world frame to camera frame
+            R = self.qvec2rotmat( qvec )
+            T = np.array( tvec )
+            pose_stack[image_id] = (R, T)
+        return pose_stack
 
 
+    def getPointCloud(self):
+        positions = []
+        colors = []
+        normals = []
+        for point3D_id, point3D in self.reconstruction.points3D.items():
+            positions.append(point3D.xyz)
+            colors.append(point3D.color)
+        positions = np.array(positions)
+        colors = np.array(colors)
+        return positions, colors
 
+
+    def getCalibration(self):
+        calib_stack = {}
+        for camera_id, camera in self.reconstruction.cameras.items():
+            focal = camera.params[0]
+            kappa = camera.params[3]
+            cx = camera.params[1]
+            cy = camera.params[2]
+            K = np.array([[focal, 0.0, cx],
+                          [0.0, focal, cy],
+                          [0.0, 0.0,  1.0]])
+            calib_stack[camera_id] = (K, kappa)
+        return calib_stack
+
+
+    @staticmethod
+    # copied from 3DGS colmap.loader.py
+    def qvec2rotmat(qvec):
+        return np.array([
+            [1 - 2 * qvec[2]**2 - 2 * qvec[3]**2,   2 * qvec[1] * qvec[2] - 2 * qvec[0] * qvec[3],  2 * qvec[3] * qvec[1] + 2 * qvec[0] * qvec[2]],
+            [2 * qvec[1] * qvec[2] + 2 * qvec[0] * qvec[3],   1 - 2 * qvec[1]**2 - 2 * qvec[3]**2,  2 * qvec[2] * qvec[3] - 2 * qvec[0] * qvec[1]],
+            [2 * qvec[3] * qvec[1] - 2 * qvec[0] * qvec[2],   2 * qvec[2] * qvec[3] + 2 * qvec[0] * qvec[1],  1 - 2 * qvec[1]**2 - 2 * qvec[2]**2]])
 
 
 
