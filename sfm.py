@@ -47,6 +47,9 @@ import cv2
 import matplotlib
 import PIL
 
+import pycolmap
+import pathlib
+
 
 
 try:
@@ -54,6 +57,8 @@ try:
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
+
+
 
 
 
@@ -86,6 +91,40 @@ class DepthAnything:
             cmap = matplotlib.colormaps.get_cmap(colormap)
             depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
         return depth
+
+
+
+
+# pip install pycolmap
+class ColMap:
+
+    def __init__ (self, image_dir = None):
+        self.reconstruction = None
+        if image_dir is not None:
+            self.run(image_dir)
+
+
+    def run(self, image_dir=None):
+        
+        if image_dir is None:
+            return
+        image_dir = pathlib.Path(image_dir)
+
+        output_path =  image_dir.parent
+        database_path = output_path / "database.db"
+
+        pycolmap.extract_features(database_path, image_dir)
+        pycolmap.match_exhaustive(database_path)
+        maps = pycolmap.incremental_mapping(database_path, image_dir, output_path)
+
+        self.reconstruction = maps[0]
+        self.reconstruction.write(output_path)
+
+
+
+
+
+
 
 
 
@@ -451,7 +490,11 @@ if __name__ == "__main__":
 
     viewpoint_stack = scene.getTrainCameras().copy()
 
-
+    # in original 3DGS, R is transposed in colmap reader and later inverted in getWorld2View2
+    # in this code, getWorld2View2 don't transpose R
+    for cam in viewpoint_stack:
+        Rt = torch.transpose(cam.R, 0, 1)
+        cam.R = Rt
 
 
 
