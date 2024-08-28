@@ -24,6 +24,7 @@ import copy
 
 import torch
 import torch.multiprocessing as mp
+import torch.optim.lr_scheduler as lr_scheduler
 
 
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
@@ -35,6 +36,7 @@ from gaussian_splatting.utils.image_utils import psnr
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_splatting.utils.graphics_utils import BasicPointCloud
 
+from gaussian_splatting.utils.general_utils import helper as lr_helper
 
 
 from utils.pose_utils import update_pose
@@ -182,17 +184,16 @@ class SFM(mp.Process):
         first_iter += 1
 
         # optimize pose
-        opt_params = []
-
+        pose_opt_params = []
         for viewpoint_cam in self.viewpoint_stack:
-            opt_params.append(
+            pose_opt_params.append(
                 {
                     "params": [viewpoint_cam.cam_rot_delta],
                     "lr": 0.003,
                     "name": "rot_{}".format(viewpoint_cam.uid),
                 }
             )
-            opt_params.append(
+            pose_opt_params.append(
                 {
                     "params": [viewpoint_cam.cam_trans_delta],
                     "lr": 0.001,
@@ -200,24 +201,36 @@ class SFM(mp.Process):
                 }
             )
             if self.require_calibration:
-                opt_params.append(
+                pose_opt_params.append(
                     {
                         "params": [viewpoint_cam.cam_focal_delta],
-                        "lr": 1.0,
+                        "lr": 2.0,
                         "name": "calibration_f_{}".format(viewpoint_cam.uid),
                     }
                 )
                 if self.allow_lens_distortion:
-                    opt_params.append(
+                    pose_opt_params.append(
                         {
                             "params": [viewpoint_cam.cam_kappa_delta],
                             "lr": 0.0001,
                             "name": "calibration_k_{}".format(viewpoint_cam.uid),
                         }
                     )
-        pose_optimizer = torch.optim.Adam(opt_params)
+        pose_optimizer = torch.optim.Adam(pose_opt_params)
         pose_optimizer.zero_grad()
 
+        # scheduler1 = lr_scheduler.ExponentialLR(pose_optimizer, gamma=0.9)
+        # scheduler2 = lr_scheduler.MultiStepLR(pose_optimizer, milestones=[30,80], gamma=0.1)
+
+        # for iteration in range(300):
+        #     lr = lr_helper(
+        #                         iteration,
+        #                         lr_init=1.0,
+        #                         lr_final=0.001,
+        #                         lr_delay_mult=0.8,
+        #                         max_steps=300,
+        #     )
+        #     print(f"lr = {lr}")
 
 
         for iteration in range(first_iter, self.opt.iterations+1):
@@ -266,27 +279,37 @@ class SFM(mp.Process):
                 time.sleep(3)
 
 
- 
-            # upapte learning rate for calibration parameters
-            if iteration == self.add_calib_noise_iter + 100:
-                for param_group in pose_optimizer.param_groups:
-                    if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] *= 0.1
-            if iteration == self.add_calib_noise_iter + 200:
-                for param_group in pose_optimizer.param_groups:
-                    if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] *= 0.1
-            if iteration == self.add_calib_noise_iter + 300:
-                for param_group in pose_optimizer.param_groups:
-                    if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] *= 0.1
-                    if "calibration_k_" in param_group["name"]:
-                        param_group["lr"] *= 0.1
+            
 
+            # if iteration == self.add_calib_noise_iter + 10:
+            #     for param_group in pose_optimizer.param_groups:
+            #         if "calibration_f_" in param_group["name"]:
+            #             param_group["lr"] *= 0.1
+            # if iteration == self.add_calib_noise_iter + 200:
+            #     for param_group in pose_optimizer.param_groups:
+            #         if "calibration_f_" in param_group["name"]:
+            #             param_group["lr"] *= 0.1
+            # if iteration == self.add_calib_noise_iter + 300:
+            #     for param_group in pose_optimizer.param_groups:
+            #         if "calibration_f_" in param_group["name"]:
+            #             param_group["lr"] *= 0.1
+
+
+            if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 5 == 0:
+                for param_group in pose_optimizer.param_groups:
+                    if "calibration_f_" in param_group["name"]:
+                        param_group["lr"] *= 0.5
+
+
+            if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 100 == 0:
+                    if "calibration_k_" in param_group["name"]:
+                        param_group["lr"] *= 0.5
 
 
             self.gaussians.update_learning_rate(iteration)
 
+
+            forzen_states = ( iteration > self.start_calib_iter and iteration < self.start_calib_iter + 20 )
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
             if iteration % 1000 == 0:
@@ -318,8 +341,8 @@ class SFM(mp.Process):
                 # print(f"mask = { (gt_image.sum(dim=0) > self.rgb_boundary_threshold) }")                
                 mask = (gt_image.sum(dim=0) > self.rgb_boundary_threshold)
                 # mask = opacity
-                Ll1 = l1_loss(image, gt_image)
-                # Ll1 = l1_loss(image*mask, gt_image*mask)
+                # Ll1 = l1_loss(image, gt_image)
+                Ll1 = l1_loss(image*mask, gt_image*mask)
                 loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1   #+ self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
@@ -358,12 +381,12 @@ class SFM(mp.Process):
                     pose_optimizer.step()
                     self.updateCalibration(flag = ( self.require_calibration and iteration >= self.start_calib_iter ))
                     for viewpoint_cam in self.viewpoint_stack:
-                        if viewpoint_cam.uid != 0:
+                        if viewpoint_cam.uid != 0 and not forzen_states:
                             update_pose(viewpoint_cam)
                     pose_optimizer.zero_grad()
 
                 # Optimizer step
-                if iteration < self.opt.iterations:
+                if iteration < self.opt.iterations and not forzen_states:
                     self.gaussians.optimizer.step()
                     self.gaussians.optimizer.zero_grad(set_to_none = True)
 
@@ -391,7 +414,7 @@ class SFM(mp.Process):
                     )
                     time.sleep(0.001)
                     if calib_profiling:
-                        time.sleep(1.0)
+                        time.sleep(0.5)
 
                     
         sfm_gui.Log(f"SfM optimization complete with {iteration} iterations.")
@@ -449,7 +472,7 @@ if __name__ == "__main__":
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
-    opt.densify_until_iter = 200
+    opt.densify_until_iter = 350
     opt.densify_grad_threshold = 0.0002
 
 
@@ -503,8 +526,8 @@ if __name__ == "__main__":
     print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
-    sfm.add_calib_noise_iter = 250
-    sfm.start_calib_iter = 250
+    sfm.add_calib_noise_iter = 150
+    sfm.start_calib_iter = 150
     sfm_process = mp.Process(target=sfm.optimize)
     sfm_process.start()
 

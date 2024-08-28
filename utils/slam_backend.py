@@ -490,7 +490,7 @@ class BackEnd(mp.Process):
                                 opt_params.append(
                                     {
                                         "params": [viewpoint.cam_focal_delta],
-                                        "lr": 0.01,
+                                        "lr": 0.1,
                                         "name": "calibration_f_{}".format(viewpoint.uid),
                                     }
                                 )
@@ -498,7 +498,7 @@ class BackEnd(mp.Process):
                                     opt_params.append(
                                         {
                                             "params": [viewpoint.cam_kappa_delta],
-                                            "lr": 0.00001,
+                                            "lr": 0.0001,
                                             "name": "calibration_k_{}".format(viewpoint.uid),
                                         }
                                     )

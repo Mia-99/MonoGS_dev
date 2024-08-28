@@ -226,7 +226,7 @@ if __name__ == "__main__":
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
-    opt.densify_until_iter = 200
+    opt.densify_until_iter = 700
     opt.densify_grad_threshold = 0.0002
 
 
@@ -284,7 +284,7 @@ if __name__ == "__main__":
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.add_calib_noise_iter = -1
-    sfm.start_calib_iter = 250
+    sfm.start_calib_iter = 150
     sfm.require_calibration = True
     sfm.allow_lens_distortion = True
     
