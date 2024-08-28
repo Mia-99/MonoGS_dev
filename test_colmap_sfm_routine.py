@@ -11,7 +11,7 @@ import pycolmap
 from gaussian_splatting.utils.graphics_utils import BasicPointCloud
 
 from sfm import SFM
-from gaussian_splatting.scene.gaussian_model import GaussianModel
+from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
 from gaussian_splatting.scene.cameras import Camera
 from gui import gui_utils, sfm_gui
 
@@ -46,7 +46,8 @@ class ColMap:
             return
         image_dir = pathlib.Path(image_dir)
 
-        output_path =  image_dir.parent
+        output_path =  image_dir.parent / "sparse"
+        output_path.mkdir(parents="False", exist_ok="True")
         database_path = output_path / "database.db"
 
         pycolmap.extract_features(database_path, image_dir)
@@ -55,25 +56,26 @@ class ColMap:
 
         self.reconstruction = maps[0]
 
-        self.reconstruction.write(output_path)
+        self.reconstruction.write(output_path )
         # self.reconstruction.write_text(output_path )  # text format
-        # self.reconstruction.export_PLY(output_path / "rec.ply")  # PLY format
+        self.reconstruction.export_PLY(output_path / "points3D.ply")  # PLY format
         print(self.reconstruction.summary())
 
 
     def getCameras(self):
         camera_stack = []
+        camera_centers = []
         calib_stack = self.getCalibration()
         posed_img_stack = self.getCamPosedImages()
         for idx, item in posed_img_stack.items():
             R, T, imgname = item
             image_path = os.path.join(self.image_dir, os.path.basename(imgname))
             image = Image.open(image_path)
-
+            # adjust image resolution if necessary
             orig_w, orig_h = image.size
 
             resolution_scale = 1.0
-            resolution = 4.0
+            resolution = 1.0
 
             imgsize = round(orig_w/(resolution_scale * resolution)), round(orig_h/(resolution_scale * resolution))
 
@@ -108,31 +110,20 @@ class ColMap:
                         device="cuda:0",
             )
             camera_stack.append(cam)
-        return camera_stack
+            camera_centers.append( - R.transpose() @ T.reshape((3, 1)) ) # camera center
+        # getNerfppNorm copied from 3DGS original implementation
+        def get_center_and_diag(cam_centers):
+            cam_centers = np.hstack(cam_centers)
+            avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
+            center = avg_cam_center
+            dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+            diagonal = np.max(dist)
+            return center.flatten(), diagonal
+        center, diagonal = get_center_and_diag(camera_centers)
+        radius = diagonal * 1.1
+        translate = -center
+        return camera_stack, {"translate": translate, "radius": radius}
 
-
-    # def getNerfppNorm(self):
-    #     def get_center_and_diag(cam_centers):
-    #         cam_centers = np.hstack(cam_centers)
-    #         avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
-    #         center = avg_cam_center
-    #         dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
-    #         diagonal = np.max(dist)
-    #         return center.flatten(), diagonal
-
-    #     cam_centers = []
-
-    #     for cam in cam_info:
-    #         W2C = getWorld2View2_GS(cam.R, cam.T)
-    #         C2W = np.linalg.inv(W2C)
-    #         cam_centers.append(C2W[:3, 3:4])
-
-    #     center, diagonal = get_center_and_diag(cam_centers)
-    #     radius = diagonal * 1.1
-
-    #     translate = -center
-
-    #     return {"translate": translate, "radius": radius}
 
 
     def getPointCloud(self):
@@ -197,6 +188,7 @@ class ColMap:
 
 
 
+
 if __name__ == "__main__":
 
 
@@ -232,7 +224,7 @@ if __name__ == "__main__":
     pipe = pp.extract(args)
 
 
-    opt.iterations = 500
+    opt.iterations = 1000
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
@@ -246,17 +238,23 @@ if __name__ == "__main__":
 
 
     image_dir = "/home/fang/SURGAR/Colmap_Test/Fountain/images"
+    # image_dir = "/home/fang/SURGAR/Colmap_Test/truck/images"
 
+
+    # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
-    viewpoint_stack = reconstruction.getCameras()
-    positions, colors = reconstruction.getPointCloud()    
 
+    # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
+    viewpoint_stack, scale_info = reconstruction.getCameras()
+    positions, colors = reconstruction.getPointCloud()    
     pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
 
-    cameras_extent = 0.1
-    gaussians = GaussianModel(0)
+    # initialize 3D Gaussians
+    print(f"scale_info = {scale_info}")
+    cameras_extent = scale_info["radius"]
+    gaussians = GaussianModel(sh_degree=1)
     gaussians.create_from_pcd(pcd, cameras_extent)
-
+    # create_pcd_from_image_and_depth(self, cam, rgb, depth, init=False)
 
 
 
@@ -287,6 +285,11 @@ if __name__ == "__main__":
     print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    sfm.add_calib_noise_iter = -1
+    sfm.require_calibration = True
+    sfm.allow_lens_distortion = True
+    
+
     sfm_process = mp.Process(target=sfm.optimize)
     sfm_process.start()
 
@@ -305,3 +308,5 @@ if __name__ == "__main__":
 
     sfm_process.join()
     sfm_gui.Log("Finished", tag="SfM")
+
+

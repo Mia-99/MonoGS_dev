@@ -29,7 +29,7 @@ import torch.multiprocessing as mp
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.scene import Scene
-from gaussian_splatting.scene.gaussian_model import GaussianModel
+from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
 from gaussian_splatting.utils.general_utils import safe_state
 from gaussian_splatting.utils.image_utils import psnr
 from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
@@ -209,7 +209,7 @@ class SFM(mp.Process):
 
         self.require_calibration = True
         self.allow_lens_distortion = True        
-        self.add_calib_noise_iter = 200
+        self.add_calib_noise_iter = -1
 
         self.cameras_extent = cameras_extent
 
@@ -402,10 +402,10 @@ class SFM(mp.Process):
 
                 # Loss
                 gt_image = viewpoint_cam.original_image.cuda()
+                Ll1 = l1_loss(image, gt_image)
                 mask = opacity
-                Ll1 = l1_loss(image*mask, gt_image*mask)
-
-                loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1  # + self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
+                # Ll1 = l1_loss(image*mask, gt_image*mask)
+                loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1   + self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
 
@@ -423,7 +423,7 @@ class SFM(mp.Process):
                     progress_bar.close()
 
                 # Densification
-                if False and iteration < self.opt.densify_until_iter:
+                if True and iteration < self.opt.densify_until_iter:
                     # Keep track of max radii in image-space for pruning
                     self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                     self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
@@ -586,6 +586,7 @@ if __name__ == "__main__":
     print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    sfm.add_calib_noise_iter = 200
     sfm_process = mp.Process(target=sfm.optimize)
     sfm_process.start()
 
