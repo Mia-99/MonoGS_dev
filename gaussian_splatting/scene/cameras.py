@@ -140,7 +140,6 @@ class Camera(nn.Module):
                     W=self.image_width,
                     H=self.image_height,
                 ).transpose(0, 1).to(device=self.device)
-        # return getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(device=self.device)
 
     @property
     def world_view_transform(self):

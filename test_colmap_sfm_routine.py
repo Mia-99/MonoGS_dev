@@ -11,6 +11,8 @@ import pycolmap
 from gaussian_splatting.utils.graphics_utils import BasicPointCloud
 
 from sfm import SFM
+from sfm import DepthAnything
+
 from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
 from gaussian_splatting.scene.cameras import Camera
 from gui import gui_utils, sfm_gui
@@ -25,7 +27,7 @@ from utils.multiprocessing_utils import FakeQueue, clone_obj
 from PIL import Image
 from gaussian_splatting.utils.general_utils import PILtoTorch
 
-
+import open3d as o3d
 
 # pip install pycolmap
 class ColMap:
@@ -233,6 +235,7 @@ if __name__ == "__main__":
 
 
 
+    use_colmap_point_cloud = True
 
 
     image_dir = "/home/fang/SURGAR/Colmap_Test/Fountain/images"
@@ -251,8 +254,24 @@ if __name__ == "__main__":
     print(f"scale_info = {scale_info}")
     cameras_extent = scale_info["radius"]
     gaussians = GaussianModel(sh_degree=0)
-    gaussians.create_from_pcd(pcd, cameras_extent)
-    # create_pcd_from_image_and_depth(self, cam, rgb, depth, init=False)
+
+
+    
+    if use_colmap_point_cloud:
+        gaussians.create_from_pcd(pcd, cameras_extent)
+
+    else:
+        cam = viewpoint_stack[0]
+
+        rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        # use depth prediction from a Neural network
+        depth_raw = DepthAnything().eval(rgb_raw)
+
+        rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
+        depth = o3d.geometry.Image(depth_raw.astype(np.float32))
+
+        gaussians.create_from_image_and_depth(cam, rgb, depth, downsample_factor = 8, point_size = 0.01)
+
 
 
 
@@ -284,7 +303,7 @@ if __name__ == "__main__":
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.add_calib_noise_iter = -1
-    sfm.start_calib_iter = 150
+    sfm.start_calib_iter = 250
     sfm.require_calibration = True
     sfm.allow_lens_distortion = True
     

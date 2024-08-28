@@ -394,14 +394,13 @@ class SFM(mp.Process):
                 if self.use_gui and (iteration % 10 == 0 or calib_profiling):
                     # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
-                    img = self.viewpoint_stack[cam_cnt].original_image.cpu().squeeze(0).numpy()
-                    # convert (3, H, W)  --- > (H, W, 3)
-                    # coorect color order BGR2RGB
-                    cv_img = img.transpose(1, 2, 0)
-                    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+                    # img = (self.viewpoint_stack[cam_cnt].original_image*255).cpu().squeeze(0).numpy()
+                    # cv_img = img.transpose(1, 2, 0)
+                    # cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+                    cv_img = (self.viewpoint_stack[cam_cnt].original_image*255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
                     # use depth prediction from a Neural network                    
-                    depth = self.depth_anything.eval(cv_img) / self.depth_scale
-                    depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+                    depth = self.depth_anything.eval(cv_img)
+                    depth = ( depth / np.median(depth) ) * 2.5
 
                     self.q_main2vis.put(
                         gui_utils.GaussianPacket(

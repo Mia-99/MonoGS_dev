@@ -499,13 +499,14 @@ class SFM_GUI:
         if gaussian_packet.gtdepth is not None:
             depth = gaussian_packet.gtdepth
             depth = imgviz.depth2rgb(
-                depth, min_value=0.1, max_value=5.0, colormap="jet"
+                depth, min_value=0.1, max_value=5.0, colormap="turbo"
             )
             depth = torch.from_numpy(depth)
             depth = torch.permute(depth, (2, 0, 1)).float()
             depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             rgb = o3d.geometry.Image(depth)
             self.in_depth_widget.update_image(rgb)
+
 
         if gaussian_packet.finish:
             Log("Received terminate signal", tag="GUI")
