@@ -64,14 +64,14 @@ class ColMap:
         print(self.reconstruction.summary())
 
 
-    def getCameras(self, downsample_scale = 4.0):
+    def getCameras(self, downsample_scale = 1.0):
         camera_stack = []
         camera_centers = []
-        calib_stack = self.getCalibration()
+        calib_stack, focal0, kappa0 = self.getCalibration()
         posed_img_stack = self.getCamPosedImages()
         for idx, item in posed_img_stack.items():
             R, T, imgname = item
-            K, kappa = calib_stack[idx]
+            # K, kappa = calib_stack[idx]
             image_path = os.path.join(self.image_dir, os.path.basename(imgname))
             image = Image.open(image_path)
             # adjust image resolution if necessary
@@ -84,11 +84,16 @@ class ColMap:
             image_height = gt_image.shape[1]
             image_width = gt_image.shape[2]
             
-            fx = K[0, 0] / downsample_scale
-            fy = K[1, 1] / downsample_scale
-            cx = K[0, 2] / downsample_scale
-            cy = K[1, 2] / downsample_scale
-            kappa = kappa / downsample_scale
+            fx = focal0 / downsample_scale
+            fy = focal0 / downsample_scale
+            cx = (image_width + 1) * 0.5
+            cy = (image_height + 1) * 0.5
+            kappa = kappa0 / downsample_scale
+            # fx = K[0, 0] / downsample_scale
+            # fy = K[1, 1] / downsample_scale
+            # cx = K[0, 2] / downsample_scale
+            # cy = K[1, 2] / downsample_scale
+            # kappa = kappa / downsample_scale
 
             cam = Camera (
                         uid = idx,
@@ -163,6 +168,8 @@ class ColMap:
 
     def getCalibration(self):
         calib_stack = {}
+        f = 0.0
+        k = 0.0
         for camera_id, camera in self.reconstruction.cameras.items():
             focal = camera.params[0]
             kappa = camera.params[3]
@@ -172,7 +179,9 @@ class ColMap:
                           [0.0, focal, cy],
                           [0.0, 0.0,  1.0]])
             calib_stack[camera_id] = (K, kappa)
-        return calib_stack
+            f += focal
+            k += kappa
+        return calib_stack,  f/len(calib_stack),  k/len(calib_stack)
 
 
     @staticmethod

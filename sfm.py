@@ -298,12 +298,14 @@ class SFM(mp.Process):
             if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 5 == 0:
                 for param_group in pose_optimizer.param_groups:
                     if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] *= 0.5
+                        lr = param_group["lr"]
+                        param_group["lr"] = 0.5 * lr if lr > 0.0001 else lr
 
 
             if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 100 == 0:
                     if "calibration_k_" in param_group["name"]:
-                        param_group["lr"] *= 0.5
+                        lr = param_group["lr"]
+                        param_group["lr"] = 0.5 * lr if lr > 0.0001 else lr
 
 
             self.gaussians.update_learning_rate(iteration)
@@ -400,7 +402,7 @@ class SFM(mp.Process):
                     cv_img = (self.viewpoint_stack[cam_cnt].original_image*255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
                     # use depth prediction from a Neural network                    
                     depth = self.depth_anything.eval(cv_img)
-                    depth = ( depth / np.median(depth) ) * 2.5
+                    depth = ( depth / np.median(depth) ) * 1.0
 
                     self.q_main2vis.put(
                         gui_utils.GaussianPacket(
