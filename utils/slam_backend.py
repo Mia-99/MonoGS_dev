@@ -320,10 +320,11 @@ class BackEnd(mp.Process):
                     if viewpoint.uid == 0:
                         continue
                     update_pose(viewpoint)
+                # below is required at every iteration, to zero the update vector
+                focal_delta, kappa_delta = self.getCalibrationUpdate(viewpoint_stack[:min(frames_to_optimize, len(current_window))])
                 # update calibration of the most recent camera.
                 # only do this if slam has been initialized
-                if self.initialized:
-                    focal_delta, kappa_delta = self.getCalibrationUpdate(viewpoint_stack[:min(frames_to_optimize, len(current_window))])
+                if self.initialized:                    
                     self.updateCalibration(viewpoint_stack[-1], focal_delta, kappa_delta)
 
         return gaussian_split
@@ -333,8 +334,8 @@ class BackEnd(mp.Process):
         focal = torch.zeros(1, device=viewpoint_stack[0].device)
         kappa = torch.zeros(1, device=viewpoint_stack[0].device)
         for viewpoint_cam in viewpoint_stack:
-            focal = focal + viewpoint_cam.cam_focal_delta
-            kappa = kappa + viewpoint_cam.cam_kappa_delta
+            focal += viewpoint_cam.cam_focal_delta
+            kappa += viewpoint_cam.cam_kappa_delta
             viewpoint_cam.cam_focal_delta.data.fill_(0)
             viewpoint_cam.cam_kappa_delta.data.fill_(0)
         focal = focal.cpu().numpy()[0]
@@ -342,9 +343,9 @@ class BackEnd(mp.Process):
         return focal, kappa
     @staticmethod
     def updateCalibration(viewpoint_cam, focal, kappa):
-        viewpoint_cam.fx = viewpoint_cam.fx + focal
-        viewpoint_cam.fy = viewpoint_cam.fy + viewpoint_cam.aspect_ratio * focal
-        viewpoint_cam.kappa = viewpoint_cam.kappa + kappa
+        viewpoint_cam.fx += focal
+        viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal
+        viewpoint_cam.kappa += kappa
 
 
     def color_refinement(self):

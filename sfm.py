@@ -130,28 +130,24 @@ class SFM(mp.Process):
 
 
 
-    def updateCalibration(self):
-
+    def updateCalibration(self, flag=False):
         focal = torch.zeros(1, device=self.viewpoint_stack[0].device)
         kappa = torch.zeros(1, device=self.viewpoint_stack[0].device)
-
         for viewpoint_cam in self.viewpoint_stack:
-
-            focal = focal + viewpoint_cam.cam_focal_delta
-            kappa = kappa + viewpoint_cam.cam_kappa_delta
-
+            focal += viewpoint_cam.cam_focal_delta
+            kappa += viewpoint_cam.cam_kappa_delta
+            # Don't forget to zero this vector every iteration. Otherwise the gradient will accumulate over iterations
             viewpoint_cam.cam_focal_delta.data.fill_(0)
             viewpoint_cam.cam_kappa_delta.data.fill_(0)
 
-        focal = focal.cpu().numpy()[0]
-        kappa = kappa.cpu().numpy()[0]
-
-        print(f"calib update: focal {focal}, kappa {kappa}")
-
-        for viewpoint_cam in self.viewpoint_stack:
-            viewpoint_cam.fx = viewpoint_cam.fx + focal
-            viewpoint_cam.fy = viewpoint_cam.fy + viewpoint_cam.aspect_ratio * focal
-            viewpoint_cam.kappa = viewpoint_cam.kappa + kappa
+        if flag == True:
+            focal = focal.cpu().numpy()[0]
+            kappa = kappa.cpu().numpy()[0]
+            print(f"calib update: focal {focal}, kappa {kappa}")
+            for viewpoint_cam in self.viewpoint_stack:
+                viewpoint_cam.fx += focal
+                viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal
+                viewpoint_cam.kappa += kappa
 
 
 
@@ -246,13 +242,13 @@ class SFM(mp.Process):
             # add noise to calibration to test the robustness
             if iteration == self.add_calib_noise_iter:
                 for viewpoint_cam in self.viewpoint_stack:
-                    focal = 620
+                    focal = 650
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
                 for param_group in pose_optimizer.param_groups:
                     if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] = 0.01
+                        param_group["lr"] = 2.0
 
                 if self.use_gui:
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
@@ -342,7 +338,7 @@ class SFM(mp.Process):
                     progress_bar.close()
 
                 # Densification
-                if False and iteration < self.opt.densify_until_iter:
+                if True and iteration < self.opt.densify_until_iter:
                     # Keep track of max radii in image-space for pruning
                     self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                     self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
@@ -360,9 +356,7 @@ class SFM(mp.Process):
                 # Optimizer step
                 if iteration > 0 and iteration < self.opt.iterations:
                     pose_optimizer.step()
-                    if self.require_calibration and iteration >= self.start_calib_iter:
-                        # print(f"update calibration at {iteration}")
-                        self.updateCalibration()
+                    self.updateCalibration(flag = ( self.require_calibration and iteration >= self.start_calib_iter ))
                     for viewpoint_cam in self.viewpoint_stack:
                         if viewpoint_cam.uid != 0:
                             update_pose(viewpoint_cam)
@@ -373,11 +367,10 @@ class SFM(mp.Process):
                     self.gaussians.optimizer.step()
                     self.gaussians.optimizer.zero_grad(set_to_none = True)
 
-
-                if self.use_gui and iteration % 10 == 0:
+                calib_profiling = self.require_calibration and iteration >= self.start_calib_iter and iteration < self.start_calib_iter + 30
+                if self.use_gui and (iteration % 10 == 0 or calib_profiling):
                     # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
-
                     img = self.viewpoint_stack[cam_cnt].original_image.cpu().squeeze(0).numpy()
                     # convert (3, H, W)  --- > (H, W, 3)
                     # coorect color order BGR2RGB
@@ -397,6 +390,9 @@ class SFM(mp.Process):
                         )
                     )
                     time.sleep(0.001)
+                    if calib_profiling:
+                        time.sleep(1.0)
+
                     
         sfm_gui.Log(f"SfM optimization complete with {iteration} iterations.")
 
