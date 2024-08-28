@@ -62,34 +62,32 @@ class ColMap:
         print(self.reconstruction.summary())
 
 
-    def getCameras(self):
+    def getCameras(self, downsample_scale = 5.0):
         camera_stack = []
         camera_centers = []
         calib_stack = self.getCalibration()
         posed_img_stack = self.getCamPosedImages()
         for idx, item in posed_img_stack.items():
             R, T, imgname = item
+            K, kappa = calib_stack[idx]
             image_path = os.path.join(self.image_dir, os.path.basename(imgname))
             image = Image.open(image_path)
             # adjust image resolution if necessary
             orig_w, orig_h = image.size
-
-            resolution_scale = 1.0
-            resolution = 1.0
-
-            imgsize = round(orig_w/(resolution_scale * resolution)), round(orig_h/(resolution_scale * resolution))
+            imgsize = round(orig_w/(downsample_scale)), round(orig_h/(downsample_scale))
 
             resized_image_rgb = PILtoTorch(image, imgsize)
             gt_image = resized_image_rgb[:3, ...]
 
             image_height = gt_image.shape[1]
             image_width = gt_image.shape[2]
+            
+            fx = K[0, 0] / downsample_scale
+            fy = K[1, 1] / downsample_scale
+            cx = K[0, 2] / downsample_scale
+            cy = K[1, 2] / downsample_scale
+            kappa = kappa / downsample_scale
 
-            K, kappa = calib_stack[idx]
-            fx = K[0, 0] / resolution
-            fy = K[1, 1] / resolution
-            cx = K[0, 2] / resolution
-            cy = K[1, 2] / resolution
             cam = Camera (
                         uid = idx,
                         color = gt_image,
@@ -132,7 +130,7 @@ class ColMap:
         normals = []
         for point3D_id, point3D in self.reconstruction.points3D.items():
             positions.append(point3D.xyz)
-            colors.append(point3D.color)
+            colors.append(point3D.color / 255.0) # use normalzied colors, which willl be passed to SH
         positions = np.array(positions)
         colors = np.array(colors)
         return positions, colors
@@ -286,6 +284,7 @@ if __name__ == "__main__":
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.add_calib_noise_iter = -1
+    sfm.start_calib_iter = 500
     sfm.require_calibration = True
     sfm.allow_lens_distortion = True
     

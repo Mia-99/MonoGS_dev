@@ -210,6 +210,7 @@ class SFM(mp.Process):
         self.require_calibration = True
         self.allow_lens_distortion = True        
         self.add_calib_noise_iter = -1
+        self.start_calib_iter = 200
 
         self.cameras_extent = cameras_extent
 
@@ -254,7 +255,7 @@ class SFM(mp.Process):
                     keyframes=copy.deepcopy(self.viewpoint_stack),
                 )
             )
-            time.sleep(1.5)
+            time.sleep(5)
 
 
         sfm_gui.Log("start SfM optimization")
@@ -380,7 +381,7 @@ class SFM(mp.Process):
 
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
-            if iteration % 500 == 0:
+            if iteration % 1000 == 0:
                 self.gaussians.oneupSHdegree()
 
 
@@ -403,9 +404,9 @@ class SFM(mp.Process):
                 # Loss
                 gt_image = viewpoint_cam.original_image.cuda()
                 Ll1 = l1_loss(image, gt_image)
-                mask = opacity
+                # mask = opacity
                 # Ll1 = l1_loss(image*mask, gt_image*mask)
-                loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1   + self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
+                loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1   #+ self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
 
@@ -441,7 +442,8 @@ class SFM(mp.Process):
                 # Optimizer step
                 if iteration > 0 and iteration < self.opt.iterations:
                     pose_optimizer.step()
-                    if self.require_calibration and iteration >= self.add_calib_noise_iter:
+                    if self.require_calibration and iteration >= self.start_calib_iter:
+                        # print(f"update calibration at {iteration}")
                         self.updateCalibration()
                     for viewpoint_cam in self.viewpoint_stack:
                         if viewpoint_cam.uid != 0:
@@ -532,7 +534,7 @@ if __name__ == "__main__":
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
-    opt.densify_until_iter = 3000
+    opt.densify_until_iter = 200
     opt.densify_grad_threshold = 0.0002
 
 
@@ -542,7 +544,7 @@ if __name__ == "__main__":
     cameras_extent = scene.cameras_extent
 
 
-    N = 3
+    N = 5
 
     viewpoint_stack = scene.getTrainCameras()
     while len(viewpoint_stack) > N:
@@ -580,13 +582,14 @@ if __name__ == "__main__":
         )
         gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
         gui_process.start()
-        time.sleep(3)
+        time.sleep(1)
 
 
     print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.add_calib_noise_iter = 200
+    sfm.start_calib_iter = 200
     sfm_process = mp.Process(target=sfm.optimize)
     sfm_process.start()
 
