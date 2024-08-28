@@ -202,7 +202,8 @@ class SFM(mp.Process):
         self.gaussians = gaussians
         self.opt = opt
 
-        self.background = torch.tensor([1, 1, 1], dtype=torch.float32, device="cuda")
+        self.background = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device="cuda")
+        self.rgb_boundary_threshold = 0.01
 
         self.pause = False
 
@@ -403,9 +404,15 @@ class SFM(mp.Process):
 
                 # Loss
                 gt_image = viewpoint_cam.original_image.cuda()
-                Ll1 = l1_loss(image, gt_image)
+                # define mask using background color threshold
+                print(f"gt_image.shape = {gt_image.shape}")
+                print(f"gt_image.sum(dim=0).shape = {gt_image.sum(dim=0).shape}")
+                print(f"gt_image.sum(dim=0) = {gt_image.sum(dim=0)}")   
+                print(f"mask = { (gt_image.sum(dim=0) > self.rgb_boundary_threshold) }")                
+                mask = (gt_image.sum(dim=0) > self.rgb_boundary_threshold)
                 # mask = opacity
-                # Ll1 = l1_loss(image*mask, gt_image*mask)
+                # Ll1 = l1_loss(image, gt_image)
+                Ll1 = l1_loss(image*mask, gt_image*mask)
                 loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1   #+ self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
@@ -572,7 +579,7 @@ if __name__ == "__main__":
 
 
     if use_gui:
-        bg_color = [1, 1, 1]
+        bg_color = [0, 0, 0]
         params_gui = gui_utils.ParamsGUI(
             pipe=pipe,
             background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),

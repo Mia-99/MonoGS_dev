@@ -62,7 +62,7 @@ class ColMap:
         print(self.reconstruction.summary())
 
 
-    def getCameras(self, downsample_scale = 5.0):
+    def getCameras(self, downsample_scale = 4.0):
         camera_stack = []
         camera_centers = []
         calib_stack = self.getCalibration()
@@ -250,7 +250,7 @@ if __name__ == "__main__":
     # initialize 3D Gaussians
     print(f"scale_info = {scale_info}")
     cameras_extent = scale_info["radius"]
-    gaussians = GaussianModel(sh_degree=1)
+    gaussians = GaussianModel(sh_degree=0)
     gaussians.create_from_pcd(pcd, cameras_extent)
     # create_pcd_from_image_and_depth(self, cam, rgb, depth, init=False)
 
