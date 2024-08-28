@@ -82,6 +82,7 @@ class DepthAnything:
 
     def eval(self, raw_img):
         depth = self.model.infer_image(raw_img) # HxW raw depth map in numpy
+        # print(f"depth = {depth}")
         return depth
     
     @staticmethod
@@ -94,97 +95,6 @@ class DepthAnything:
             depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
         return depth
 
-
-
-
-# pip install pycolmap
-class ColMap:
-
-    def __init__ (self, image_dir = None):
-
-        self.reconstruction = None
-        
-        if image_dir is not None:
-            self.run(image_dir)
-
-
-    def run(self, image_dir=None):
-        
-        if image_dir is None:
-            return
-        image_dir = pathlib.Path(image_dir)
-
-        output_path =  image_dir.parent
-        database_path = output_path / "database.db"
-
-        pycolmap.extract_features(database_path, image_dir)
-        pycolmap.match_exhaustive(database_path)
-        maps = pycolmap.incremental_mapping(database_path, image_dir, output_path)
-
-        self.reconstruction = maps[0]
-
-        self.reconstruction.write(output_path)
-        # self.reconstruction.write_text(output_path )  # text format
-        # self.reconstruction.export_PLY(output_path / "rec.ply")  # PLY format
-        print(self.reconstruction.summary())
-
-
-    # The reconstructed pose of an image is specified as 
-    # the projection from world to the camera coordinate system of an image using
-    # a quaternion (QW, QX, QY, QZ) and a translation vector (TX, TY, TZ).
-    # The coordinates of the projection/camera center are given by -R^t * T
-    # The local camera coordinate system of an image is defined in a way that:
-    #   * the X axis points to the right,
-    #   * the Y axis to the bottom,
-    #   * the Z axis to the front as seen from the image.
-    # Bring a world point X_world to camera frame
-    # X_cam = R * X_world  +  t
-    def getCamPoses(self):
-        pose_stack = {}
-        for image_id, image in self.reconstruction.images.items():
-            pose = image.cam_from_world
-            qvec = pose.rotation.quat
-            tvec = pose.translation
-            # [ R, T ] is a tranformation from world frame to camera frame
-            R = self.qvec2rotmat( qvec )
-            T = np.array( tvec )
-            pose_stack[image_id] = (R, T)
-        return pose_stack
-
-
-    def getPointCloud(self):
-        positions = []
-        colors = []
-        normals = []
-        for point3D_id, point3D in self.reconstruction.points3D.items():
-            positions.append(point3D.xyz)
-            colors.append(point3D.color)
-        positions = np.array(positions)
-        colors = np.array(colors)
-        return positions, colors
-
-
-    def getCalibration(self):
-        calib_stack = {}
-        for camera_id, camera in self.reconstruction.cameras.items():
-            focal = camera.params[0]
-            kappa = camera.params[3]
-            cx = camera.params[1]
-            cy = camera.params[2]
-            K = np.array([[focal, 0.0, cx],
-                          [0.0, focal, cy],
-                          [0.0, 0.0,  1.0]])
-            calib_stack[camera_id] = (K, kappa)
-        return calib_stack
-
-
-    @staticmethod
-    # copied from 3DGS colmap.loader.py
-    def qvec2rotmat(qvec):
-        return np.array([
-            [1 - 2 * qvec[2]**2 - 2 * qvec[3]**2,   2 * qvec[1] * qvec[2] - 2 * qvec[0] * qvec[3],  2 * qvec[3] * qvec[1] + 2 * qvec[0] * qvec[2]],
-            [2 * qvec[1] * qvec[2] + 2 * qvec[0] * qvec[3],   1 - 2 * qvec[1]**2 - 2 * qvec[3]**2,  2 * qvec[2] * qvec[3] - 2 * qvec[0] * qvec[1]],
-            [2 * qvec[3] * qvec[1] - 2 * qvec[0] * qvec[2],   2 * qvec[2] * qvec[3] + 2 * qvec[0] * qvec[1],  1 - 2 * qvec[1]**2 - 2 * qvec[2]**2]])
 
 
 
@@ -216,6 +126,7 @@ class SFM(mp.Process):
         self.cameras_extent = cameras_extent
 
         self.depth_anything = DepthAnything()
+        self.depth_scale = 10
 
 
 
@@ -235,7 +146,7 @@ class SFM(mp.Process):
         focal = focal.cpu().numpy()[0]
         kappa = kappa.cpu().numpy()[0]
 
-        # print(f"calib update: focal {focal}, kappa {kappa}")
+        print(f"calib update: focal {focal}, kappa {kappa}")
 
         for viewpoint_cam in self.viewpoint_stack:
             viewpoint_cam.fx = viewpoint_cam.fx + focal
@@ -335,13 +246,13 @@ class SFM(mp.Process):
             # add noise to calibration to test the robustness
             if iteration == self.add_calib_noise_iter:
                 for viewpoint_cam in self.viewpoint_stack:
-                    focal = 650
+                    focal = 620
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
                 for param_group in pose_optimizer.param_groups:
                     if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] = 10.0
+                        param_group["lr"] = 0.01
 
                 if self.use_gui:
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
@@ -405,14 +316,14 @@ class SFM(mp.Process):
                 # Loss
                 gt_image = viewpoint_cam.original_image.cuda()
                 # define mask using background color threshold
-                print(f"gt_image.shape = {gt_image.shape}")
-                print(f"gt_image.sum(dim=0).shape = {gt_image.sum(dim=0).shape}")
-                print(f"gt_image.sum(dim=0) = {gt_image.sum(dim=0)}")   
-                print(f"mask = { (gt_image.sum(dim=0) > self.rgb_boundary_threshold) }")                
+                # print(f"gt_image.shape = {gt_image.shape}")
+                # print(f"gt_image.sum(dim=0).shape = {gt_image.sum(dim=0).shape}")
+                # print(f"gt_image.sum(dim=0) = {gt_image.sum(dim=0)}")   
+                # print(f"mask = { (gt_image.sum(dim=0) > self.rgb_boundary_threshold) }")                
                 mask = (gt_image.sum(dim=0) > self.rgb_boundary_threshold)
                 # mask = opacity
-                # Ll1 = l1_loss(image, gt_image)
-                Ll1 = l1_loss(image*mask, gt_image*mask)
+                Ll1 = l1_loss(image, gt_image)
+                # Ll1 = l1_loss(image*mask, gt_image*mask)
                 loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1   #+ self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
@@ -431,7 +342,7 @@ class SFM(mp.Process):
                     progress_bar.close()
 
                 # Densification
-                if True and iteration < self.opt.densify_until_iter:
+                if False and iteration < self.opt.densify_until_iter:
                     # Keep track of max radii in image-space for pruning
                     self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                     self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
@@ -473,7 +384,8 @@ class SFM(mp.Process):
                     cv_img = img.transpose(1, 2, 0)
                     cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
                     # use depth prediction from a Neural network                    
-                    depth = self.depth_anything.eval(cv_img)
+                    depth = self.depth_anything.eval(cv_img) / self.depth_scale
+                    depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
 
                     self.q_main2vis.put(
                         gui_utils.GaussianPacket(
@@ -551,7 +463,7 @@ if __name__ == "__main__":
     cameras_extent = scene.cameras_extent
 
 
-    N = 5
+    N = 3
 
     viewpoint_stack = scene.getTrainCameras()
     while len(viewpoint_stack) > N:
@@ -595,8 +507,8 @@ if __name__ == "__main__":
     print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
-    sfm.add_calib_noise_iter = 200
-    sfm.start_calib_iter = 200
+    sfm.add_calib_noise_iter = 250
+    sfm.start_calib_iter = 250
     sfm_process = mp.Process(target=sfm.optimize)
     sfm_process.start()
 
