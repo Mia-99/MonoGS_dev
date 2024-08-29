@@ -7,8 +7,8 @@ import cv2
 import imgviz
 
 
-
 from submodules.DepthAnythingV2.depth_anything_v2.dpt import DepthAnythingV2
+
 
 
 
@@ -41,6 +41,8 @@ class DepthAnything:
             cmap = matplotlib.colormaps.get_cmap(colormap)
             depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
         return depth
+
+
 
 
 

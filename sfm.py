@@ -46,13 +46,8 @@ from gui import gui_utils, sfm_gui
 from utils.multiprocessing_utils import FakeQueue, clone_obj
 
 
-from submodules.DepthAnythingV2.depth_anything_v2.dpt import DepthAnythingV2
-import cv2
-import matplotlib
-import PIL
+from depth_anything import DepthAnything
 
-import pycolmap
-import pathlib
 
 
 
@@ -61,42 +56,6 @@ try:
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
-
-
-
-
-
-class DepthAnything:
-
-    def __init__(self, encoder = 'vitb') -> None:
-        # encoder = 'vitb' # or 'vits', 'vitb', 'vitg'
-
-        self.model_configs = {
-            'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
-            'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
-            'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
-            'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
-                }
-
-        self.model = DepthAnythingV2(**self.model_configs[encoder])
-        self.model.load_state_dict(torch.load(f'submodules/DepthAnythingV2/checkpoints/depth_anything_v2_{encoder}.pth', map_location='cpu'))
-        self.model = self.model.to('cuda').eval()
-
-    def eval(self, raw_img):
-        depth = self.model.infer_image(raw_img) # HxW raw depth map in numpy
-        # print(f"depth = {depth}")
-        return depth
-    
-    @staticmethod
-    # candidate colormaps: 'nipy_spectral', 'Spectral_r', 'turbo', 'plasma'
-    def depth2image (depth, colormap=None):
-        depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
-        depth = depth.astype(np.uint8)
-        if colormap is not None:
-            cmap = matplotlib.colormaps.get_cmap(colormap)
-            depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-        return depth
-
 
 
 

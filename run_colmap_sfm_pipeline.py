@@ -1,0 +1,171 @@
+
+import sys, os
+
+import torch
+import torch.multiprocessing as mp
+
+import numpy as np
+
+from gaussian_splatting.utils.graphics_utils import BasicPointCloud
+
+
+from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
+from gaussian_splatting.scene.cameras import Camera
+from gui import gui_utils, sfm_gui
+
+import time
+from argparse import ArgumentParser, Namespace
+from gaussian_splatting.arguments import ModelParams, PipelineParams, OptimizationParams
+
+from gaussian_splatting.utils.general_utils import safe_state
+from utils.multiprocessing_utils import FakeQueue, clone_obj
+
+from PIL import Image
+from gaussian_splatting.utils.general_utils import PILtoTorch
+
+import open3d as o3d
+
+
+
+from sfm import SFM
+from depth_anything import DepthAnything
+from colmap import ColMap
+from colmap import assemble_3DGS_cameras
+
+
+
+
+if __name__ == "__main__":
+
+
+
+    mp.set_start_method('spawn')
+
+
+    # Set up command line argument parser
+    parser = ArgumentParser(description="Training script parameters")
+    lp = ModelParams(parser)
+    op = OptimizationParams(parser)
+    pp = PipelineParams(parser)
+    parser.add_argument('--ip', type=str, default="127.0.0.1")
+    parser.add_argument('--port', type=int, default=6009)
+    parser.add_argument('--debug_from', type=int, default=-1)
+    parser.add_argument('--detect_anomaly', action='store_true', default=False)
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
+    parser.add_argument("--start_checkpoint", type=str, default = None)
+    args = parser.parse_args(sys.argv[1:])
+    args.save_iterations.append(args.iterations)
+    
+    print("Optimizing " + args.model_path)
+
+    # Initialize system state (RNG)
+    safe_state(args.quiet)
+
+
+    dataset = lp.extract(args)
+    opt = op.extract(args)
+    pipe = pp.extract(args)
+
+
+    opt.iterations = 1000
+    opt.densification_interval = 50
+    opt.opacity_reset_interval = 350
+    opt.densify_from_iter = 49
+    opt.densify_until_iter = 700
+    opt.densify_grad_threshold = 0.0002
+
+
+
+
+
+    use_colmap_point_cloud = True
+
+
+    image_dir = "/home/fang/SURGAR/Colmap_Test/Fountain/images"
+
+
+    # perform colmap reconstruction
+    reconstruction = ColMap(image_dir)
+
+    # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
+    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
+    positions, colors = reconstruction.getPointCloud()
+    pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
+
+    # initialize 3D Gaussians
+    print(f"scale_info = {scale_info}")
+    cameras_extent = scale_info["radius"]
+    gaussians = GaussianModel(sh_degree=0)
+
+
+    
+    if use_colmap_point_cloud:
+        gaussians.create_from_pcd(pcd, cameras_extent)
+
+    else:
+        cam = viewpoint_stack[0]
+
+        rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        # use depth prediction from a Neural network
+        depth_raw = DepthAnything().eval(rgb_raw)
+
+        rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
+        depth = o3d.geometry.Image(depth_raw.astype(np.float32))
+
+        gaussians.create_from_image_and_depth(cam, rgb, depth, downsample_factor = 8, point_size = 0.01)
+
+
+
+
+    torch.autograd.set_detect_anomaly(args.detect_anomaly)
+
+
+
+    ## visualization
+    use_gui = True
+    q_main2vis = mp.Queue() if use_gui else FakeQueue()
+    q_vis2main = mp.Queue() if use_gui else FakeQueue()
+
+
+    if use_gui:
+        bg_color = [1, 1, 1]
+        params_gui = gui_utils.ParamsGUI(
+            pipe=pipe,
+            background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
+            gaussians=GaussianModel(dataset.sh_degree),
+            q_main2vis=q_main2vis,
+            q_vis2main=q_vis2main,
+        )
+        gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
+        gui_process.start()
+        time.sleep(3)
+
+
+    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
+
+    sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    sfm.add_calib_noise_iter = -1
+    sfm.start_calib_iter = 50
+    sfm.require_calibration = True
+    sfm.allow_lens_distortion = True
+    
+
+    sfm_process = mp.Process(target=sfm.optimize)
+    sfm_process.start()
+
+  
+    torch.cuda.synchronize()
+
+
+    if use_gui:
+        gui_process.join()
+        sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
+
+
+    sfm_process.join()
+    sfm_gui.Log("Finished", tag="SfM")
+
+
