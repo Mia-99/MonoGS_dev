@@ -13,6 +13,7 @@ import open3d.visualization.rendering as rendering
 import torch
 import torch.nn.functional as F
 from OpenGL import GL as gl
+import matplotlib
 
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.utils.graphics_utils import fov2focal, getWorld2View2
@@ -449,12 +450,20 @@ class SLAM_GUI:
 
         if gaussian_packet.gtdepth is not None:
             depth = gaussian_packet.gtdepth
+
             depth = imgviz.depth2rgb(
-                depth, min_value=0.1, max_value=5.0, colormap="jet"
+                depth, min_value=0.1, max_value=5.0, colormap="turbo"
             )
             depth = torch.from_numpy(depth)
-            depth = torch.permute(depth, (2, 0, 1)).float()
+            depth = torch.permute(depth, (2, 0, 1)).float()   
             depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+
+            # colormap='nipy_spectral'
+            # depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+            # depth = depth.astype(np.uint8)
+            # cmap = matplotlib.colormaps.get_cmap(colormap)
+            # depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+
             rgb = o3d.geometry.Image(depth)
             self.in_depth_widget.update_image(rgb)
 

@@ -280,7 +280,7 @@ if __name__ == "__main__":
 
     calib_opts = OnlineCalibrationSettings()
     # adjust controlo params
-    calib_opts.require_calibration = False
+    calib_opts.require_calibration = True
     calib_opts.allow_lens_distortion = True  # activated only when require_calibration = True
 
 

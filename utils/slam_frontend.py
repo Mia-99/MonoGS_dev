@@ -179,7 +179,6 @@ class FrontEnd(mp.Process):
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
 
-            print(f"viewpoint.depth = {viewpoint.depth}")
             if tracking_itr % 10 == 0:
                 self.q_main2vis.put(
                     gui_utils.GaussianPacket(

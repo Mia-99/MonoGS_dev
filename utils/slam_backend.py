@@ -37,6 +37,7 @@ class BackEnd(mp.Process):
         self.current_window = []
         self.initialized = not self.monocular
         self.keyframe_optimizers = None
+        self.calibration_optimizers = None
 
         # calibration control params
         self.require_calibration = False
@@ -81,6 +82,7 @@ class BackEnd(mp.Process):
         self.current_window = []
         self.initialized = not self.monocular
         self.keyframe_optimizers = None
+        self.calibration_optimizers = None
 
         # remove all gaussians
         self.gaussians.prune_points(self.gaussians.unique_kfIDs >= 0)
@@ -320,11 +322,13 @@ class BackEnd(mp.Process):
                     if viewpoint.uid == 0:
                         continue
                     update_pose(viewpoint)
-                # below is required at every iteration, to zero the update vector
-                focal_delta, kappa_delta = self.getCalibrationUpdate(viewpoint_stack[:min(frames_to_optimize, len(current_window))])
-                # update calibration of the most recent camera.
-                # only do this if slam has been initialized
-                if self.initialized:                    
+                # only do calibration if slam has been initialized
+                if self.require_calibration and self.initialized:
+                    self.calibration_optimizers.step()
+                    self.calibration_optimizers.zero_grad(set_to_none=True)
+                    focal_delta, kappa_delta = self.getCalibrationUpdate(viewpoint_stack[:min(frames_to_optimize, len(current_window))])
+                    # update calibration of the most recent camera
+                    print(f"update calibration: focal_delta = {focal_delta},  kappa_delta = {kappa_delta}")
                     self.updateCalibration(viewpoint_stack[-1], focal_delta, kappa_delta)
 
         return gaussian_split
@@ -447,7 +451,8 @@ class BackEnd(mp.Process):
                     self.current_window = current_window
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
-                    opt_params = []
+                    pose_opt_params = []
+                    calib_opt_params = []
                     frames_to_optimize = self.config["Training"]["pose_window"]
                     iter_per_kf = self.mapping_itr_num if self.single_thread else 10
                     if not self.initialized:
@@ -467,7 +472,7 @@ class BackEnd(mp.Process):
                             continue
                         viewpoint = self.viewpoints[current_window[cam_idx]]
                         if cam_idx < frames_to_optimize:
-                            opt_params.append(
+                            pose_opt_params.append(
                                 {
                                     "params": [viewpoint.cam_rot_delta],
                                     "lr": self.config["Training"]["lr"]["cam_rot_delta"]
@@ -475,7 +480,7 @@ class BackEnd(mp.Process):
                                     "name": "rot_{}".format(viewpoint.uid),
                                 }
                             )
-                            opt_params.append(
+                            pose_opt_params.append(
                                 {
                                     "params": [viewpoint.cam_trans_delta],
                                     "lr": self.config["Training"]["lr"][
@@ -486,37 +491,40 @@ class BackEnd(mp.Process):
                                 }
                             )
                             # add self-calibration params
-                            if self.require_calibration:
-                                opt_params.append(
+                            calib_opt_params.append(
+                                {
+                                    "params": [viewpoint.cam_focal_delta],
+                                    "lr": 0.01,
+                                    "name": "calibration_f_{}".format(viewpoint.uid),
+                                }
+                            )
+                            if self.allow_lens_distortion:
+                                calib_opt_params.append(
                                     {
-                                        "params": [viewpoint.cam_focal_delta],
-                                        "lr": 0.1,
-                                        "name": "calibration_f_{}".format(viewpoint.uid),
+                                        "params": [viewpoint.cam_kappa_delta],
+                                        "lr": 0.0001,
+                                        "name": "calibration_k_{}".format(viewpoint.uid),
                                     }
                                 )
-                                if self.allow_lens_distortion:
-                                    opt_params.append(
-                                        {
-                                            "params": [viewpoint.cam_kappa_delta],
-                                            "lr": 0.0001,
-                                            "name": "calibration_k_{}".format(viewpoint.uid),
-                                        }
-                                    )
-                        opt_params.append(
+                        pose_opt_params.append(
                             {
                                 "params": [viewpoint.exposure_a],
                                 "lr": 0.01,
                                 "name": "exposure_a_{}".format(viewpoint.uid),
                             }
                         )
-                        opt_params.append(
+                        pose_opt_params.append(
                             {
                                 "params": [viewpoint.exposure_b],
                                 "lr": 0.01,
                                 "name": "exposure_b_{}".format(viewpoint.uid),
                             }
                         )
-                    self.keyframe_optimizers = torch.optim.Adam(opt_params)
+                    self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
+                    self.calibration_optimizers = torch.optim.NAdam(calib_opt_params)
+
+                    self.keyframe_optimizers.zero_grad()
+                    self.calibration_optimizers.zero_grad()
 
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)

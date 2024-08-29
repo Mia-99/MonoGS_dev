@@ -92,24 +92,23 @@ class SFM(mp.Process):
 
 
     def updateCalibration(self, flag=False):
-        focal = torch.zeros(1, device=self.viewpoint_stack[0].device)
-        kappa = torch.zeros(1, device=self.viewpoint_stack[0].device)
+        focal_delta = torch.zeros(1, device=self.viewpoint_stack[0].device)
+        kappa_delta = torch.zeros(1, device=self.viewpoint_stack[0].device)
         for viewpoint_cam in self.viewpoint_stack:
-            focal += viewpoint_cam.cam_focal_delta
-            kappa += viewpoint_cam.cam_kappa_delta
+            focal_delta += viewpoint_cam.cam_focal_delta
+            kappa_delta += viewpoint_cam.cam_kappa_delta
             # Don't forget to zero this vector every iteration. Otherwise the gradient will accumulate over iterations
             viewpoint_cam.cam_focal_delta.data.fill_(0)
             viewpoint_cam.cam_kappa_delta.data.fill_(0)
 
         if flag == True:
-            focal = focal.cpu().numpy()[0]
-            kappa = kappa.cpu().numpy()[0]
-            print(f"calib update: focal {focal}, kappa {kappa}")
+            focal_delta = focal_delta.cpu().numpy()[0]
+            kappa_delta = kappa_delta.cpu().numpy()[0]
             for viewpoint_cam in self.viewpoint_stack:
-                viewpoint_cam.fx += focal
-                viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal
-                viewpoint_cam.kappa += kappa
-
+                viewpoint_cam.fx += focal_delta
+                viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta
+                viewpoint_cam.kappa += kappa_delta
+            print(f"update calibration: focal_delta = {focal_delta},  kappa_delta = {kappa_delta}")
 
 
 
@@ -335,8 +334,6 @@ class SFM(mp.Process):
                     cv_img = (self.viewpoint_stack[cam_cnt].original_image*255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
                     # use depth prediction from a Neural network                    
                     depth = self.depth_anything.eval(cv_img)
-                    depth = ( depth / np.median(depth) ) * 1.0
-
                     self.q_main2vis.put(
                         gui_utils.GaussianPacket(
                             gaussians=self.gaussians,
