@@ -11,7 +11,7 @@ from gaussian_splatting.utils.graphics_utils import BasicPointCloud
 from gaussian_splatting.scene.cameras import Camera
 from gaussian_splatting.utils.general_utils import PILtoTorch
 
-
+import open3d as o3d
 
 
 # pip install pycolmap
@@ -202,3 +202,43 @@ if __name__ == "__main__":
     pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
  
+
+
+    try:
+
+        # Create a visualizer
+        WIDTH = 1280
+        HEIGHT = 720
+
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(width=WIDTH, height=HEIGHT)
+
+
+        # add poinit-cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(positions)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+        pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+
+        vis.add_geometry(pcd)
+        opt = vis.get_render_option()
+        opt.point_show_normal = True
+        
+        
+        # add cameras
+        for idx, item in posed_img_stack.items():
+            R, T, imgname = item
+            K, kappa = calib_stack[idx]
+            intrinsic = K            
+            extrinsic = np.eye(4)
+            extrinsic[:3, :3] = R
+            extrinsic[:3, 3] = T
+            cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=WIDTH, view_height_px=HEIGHT, intrinsic=intrinsic, extrinsic=extrinsic)
+            vis.add_geometry(cameraLines)
+
+
+        # visualize and block
+        vis.run()
+    
+    except:
+        pass
