@@ -133,7 +133,7 @@ if __name__ == "__main__":
 
 
     if use_gui:
-        bg_color = [1, 1, 1]
+        bg_color = [0.0, 0.0, 0.0]
         params_gui = gui_utils.ParamsGUI(
             pipe=pipe,
             background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
@@ -150,7 +150,7 @@ if __name__ == "__main__":
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.add_calib_noise_iter = -1
-    sfm.start_calib_iter = 50
+    sfm.start_calib_iter = 100
     sfm.require_calibration = True
     sfm.allow_lens_distortion = True
     

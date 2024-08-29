@@ -171,7 +171,7 @@ class SFM(mp.Process):
             calib_opt_params.append(
                 {
                     "params": [viewpoint_cam.cam_focal_delta],
-                    "lr": 1.0,
+                    "lr": 0.1,
                     "name": "calibration_f_{}".format(viewpoint_cam.uid),
                 }
             )
@@ -216,7 +216,7 @@ class SFM(mp.Process):
                     viewpoint_cam.kappa = 0.0
                 for param_group in pose_optimizer.param_groups:
                     if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] = 2.0
+                        param_group["lr"] = 2.0  # start from a large leraning rate as we modify focal abruptly.
 
                 if self.use_gui:
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
@@ -306,7 +306,7 @@ class SFM(mp.Process):
 
 
                 # Optimizer step
-                if iteration > 0 and iteration < self.opt.iterations and self.require_calibration and iteration >= self.start_calib_iter:
+                if self.require_calibration and iteration > 0 and iteration < self.opt.iterations and iteration >= self.start_calib_iter:
                     calib_optimizer.step()
                     self.updateCalibration(flag = True)
                     calib_optimizer.zero_grad()
@@ -440,7 +440,7 @@ if __name__ == "__main__":
 
 
     if use_gui:
-        bg_color = [0, 0, 0]
+        bg_color = [0.0, 0.0, 0.0]
         params_gui = gui_utils.ParamsGUI(
             pipe=pipe,
             background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
