@@ -70,7 +70,7 @@ if __name__ == "__main__":
     pipe = pp.extract(args)
 
 
-    opt.iterations = 1000
+    opt.iterations = 5000
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
@@ -91,24 +91,26 @@ if __name__ == "__main__":
     reconstruction = ColMap(image_dir)
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
-    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
-    positions, colors = reconstruction.getPointCloud()
-    pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
-
-    # initialize 3D Gaussians
+    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = 5.0,  use_same_calib = True)
+        
+    
     print(f"scale_info = {scale_info}")
     cameras_extent = scale_info["radius"]
+
+
+    # initialize 3D Gaussians
     gaussians = GaussianModel(sh_degree=0)
-
-
     
     if use_colmap_point_cloud:
+        positions, colors = reconstruction.getPointCloud()
+        pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
         gaussians.create_from_pcd(pcd, cameras_extent)
 
     else:
         cam = viewpoint_stack[0]
 
         rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+
         # use depth prediction from a Neural network
         depth_raw = DepthAnything().eval(rgb_raw)
 

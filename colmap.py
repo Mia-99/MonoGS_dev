@@ -39,16 +39,24 @@ class ColMap:
         output_path.mkdir(parents="False", exist_ok="True")
         database_path = output_path / "database.db"
 
+        mvs_path = image_dir.parent / "dense"
+        mvs_path.mkdir(parents="False", exist_ok="True")
+
         pycolmap.extract_features(database_path, image_dir)
         pycolmap.match_exhaustive(database_path)
         maps = pycolmap.incremental_mapping(database_path, image_dir, output_path)
 
+        # sparse reconstruction
         self.reconstruction = maps[0]
-
         self.reconstruction.write(output_path )
         # self.reconstruction.write_text(output_path )  # text format
         self.reconstruction.export_PLY(output_path / "points3D.ply")  # PLY format
         print(self.reconstruction.summary())
+
+        # dense reconstruction
+        pycolmap.undistort_images(mvs_path, output_path, image_dir)
+        # pycolmap.patch_match_stereo(mvs_path)  # requires compilation with CUDA
+        # pycolmap.stereo_fusion(mvs_path / "dense.ply", mvs_path)
 
 
     def getPointCloud(self):
@@ -86,22 +94,24 @@ class ColMap:
         return pose_stack
 
 
-    def getCalibration(self):
+    def getCalibration(self):        
         calib_stack = {}
-        f = 0.0
-        k = 0.0
+        avg_K = np.zeros((3,3))
+        avg_kappa = 0.0
         for camera_id, camera in self.reconstruction.cameras.items():
-            focal = camera.params[0]
-            kappa = camera.params[3]
-            cx = camera.params[1]
-            cy = camera.params[2]
-            K = np.array([[focal, 0.0, cx],
-                          [0.0, focal, cy],
-                          [0.0, 0.0,  1.0]])
-            calib_stack[camera_id] = (K, kappa)
-            f += focal
-            k += kappa
-        return calib_stack,  f/len(calib_stack),  k/len(calib_stack)
+            if camera.model == pycolmap.CameraModelId.SIMPLE_RADIAL:
+                fx = camera.params[0]
+                fy = camera.params[0]
+                cx = camera.params[1]
+                cy = camera.params[2]
+                kappa = camera.params[3]
+                K = np.array([[fx,  0.0, cx],
+                            [0.0, fy,  cy],
+                            [0.0, 0.0, 1.0]])
+                calib_stack[camera_id] = (K, kappa)
+                avg_K += K
+                avg_kappa += kappa
+        return calib_stack,  avg_K/len(calib_stack),  avg_kappa/len(calib_stack)
 
 
     @staticmethod
@@ -118,14 +128,15 @@ class ColMap:
 
 
 # a function to create a list of Camera classes in 3DGS/MonoGS
-def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0):
+def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_calib = True):
     camera_stack = []
     camera_centers = []
-    calib_stack, focal0, kappa0 = colmap.getCalibration()
+    calib_stack, avg_K, avg_kappa = colmap.getCalibration()
     posed_img_stack = colmap.getCamPosedImages()
+
     for idx, item in posed_img_stack.items():
         R, T, imgname = item
-        # K, kappa = calib_stack[idx]
+        
         image_path = os.path.join(colmap.image_dir, os.path.basename(imgname))
         image = Image.open(image_path)
         # adjust image resolution if necessary
@@ -138,16 +149,19 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0):
         image_height = gt_image.shape[1]
         image_width = gt_image.shape[2]
         
-        fx = focal0 / downsample_scale
-        fy = focal0 / downsample_scale
-        cx = (image_width + 1) * 0.5
-        cy = (image_height + 1) * 0.5
-        kappa = kappa0 / downsample_scale
-        # fx = K[0, 0] / downsample_scale
-        # fy = K[1, 1] / downsample_scale
-        # cx = K[0, 2] / downsample_scale
-        # cy = K[1, 2] / downsample_scale
-        # kappa = kappa / downsample_scale
+        if use_same_calib:
+            fx = avg_K[0, 0]  / downsample_scale
+            fy = avg_K[1, 1]  / downsample_scale
+            cx = avg_K[0, 2]  / downsample_scale
+            cy = avg_K[1, 2]  / downsample_scale
+            kappa = avg_kappa / downsample_scale
+        else:
+            K, kappa = calib_stack[idx]
+            fx = K[0, 0]  / downsample_scale
+            fy = K[1, 1]  / downsample_scale
+            cx = K[0, 2]  / downsample_scale
+            cy = K[1, 2]  / downsample_scale
+            kappa = kappa / downsample_scale
 
         cam = Camera (
                     uid = idx,
