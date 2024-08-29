@@ -214,7 +214,7 @@ class SFM(mp.Process):
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
-                for param_group in pose_optimizer.param_groups:
+                for param_group in calib_optimizer.param_groups:
                     if "calibration_f_" in param_group["name"]:
                         param_group["lr"] = 2.0  # start from a large leraning rate as we modify focal abruptly.
 
@@ -398,11 +398,11 @@ if __name__ == "__main__":
 
 
 
-    opt.iterations = 500
+    opt.iterations = 1000
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
-    opt.densify_until_iter = 350
+    opt.densify_until_iter = 750
     opt.densify_grad_threshold = 0.0002
 
 
