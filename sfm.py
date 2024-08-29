@@ -123,7 +123,7 @@ class SFM(mp.Process):
                     keyframes=copy.deepcopy(self.viewpoint_stack),
                 )
             )
-            time.sleep(5)
+            time.sleep(3)
 
 
         sfm_gui.Log("start SfM optimization")
@@ -197,6 +197,7 @@ class SFM(mp.Process):
                 self.pause = data_vis2main.flag_pause            
                 while self.pause:
                     if self.q_vis2main.empty():
+                            time.sleep(0.01)
                             continue
                     else:
                         data_vis2main = self.q_vis2main.get()

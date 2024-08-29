@@ -198,13 +198,13 @@ class Camera(nn.Module):
     @staticmethod
     def init_from_gui(uid, T, FoVx, FoVy, fx, fy, cx, cy, H, W):
         img = torch.randint(0, 256, size=(3, H, W), dtype=torch.uint8)
-        return Camera(
+        return Camera (
             uid = uid,
             color = img,
             depth = None,
             image_height = H,
             image_width = W,
-            R = T[:3, :3].cpu().numpy(),
+            R = T[:3, :3].cpu().numpy(), 
             T = T[:3, 3].cpu().numpy(),
             fx = fx,
             fy = fy,
@@ -213,6 +213,10 @@ class Camera(nn.Module):
             fovx = FoVx,
             fovy = FoVy,
             kappa = 0.0,
+            trans=np.array([0.0, 0.0, 0.0]),
+            scale=1.0,
+            gt_alpha_mask = None,
+            device="cuda:0",
         )
 
 

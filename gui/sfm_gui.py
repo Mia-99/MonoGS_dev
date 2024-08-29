@@ -504,7 +504,7 @@ class SFM_GUI:
             #     depth, min_value=0.1, max_value=5.0, colormap="turbo"
             # )
             # depth = torch.from_numpy(depth)
-            # depth = torch.permute(depth, (2, 0, 1)).float()   
+            # depth = torch.permute(depth, (2, 0, 1)).float()
             # depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
 
             colormap='nipy_spectral'
@@ -771,9 +771,8 @@ class SFM_GUI:
 
             def update():                
                 if self.step % 3 == 0:
-                    status = self.receive_data(self.q_main2vis)
-                    if status:
-                        self.render_gui()
+                    self.receive_data(self.q_main2vis)                    
+                    self.render_gui()
 
                 if self.step >= 1e9:
                     self.step = 0
