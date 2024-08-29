@@ -393,9 +393,8 @@ if __name__ == "__main__":
     pipe = pp.extract(args)
 
 
-    print(opt.__dict__)
-
-    print(pipe.__dict__)
+    # print(opt.__dict__)
+    # print(pipe.__dict__)
 
 
 
@@ -413,7 +412,7 @@ if __name__ == "__main__":
     cameras_extent = scene.cameras_extent
 
 
-    N = 5
+    N = 3
 
     viewpoint_stack = scene.getTrainCameras()
     while len(viewpoint_stack) > N:
@@ -471,9 +470,6 @@ if __name__ == "__main__":
         sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
 
 
-
-    print(q_main2vis.empty())
-    print(q_vis2main.empty())
 
     sfm_process.join()
     sfm_gui.Log("Finished", tag="SfM")
