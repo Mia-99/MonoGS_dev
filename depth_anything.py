@@ -58,16 +58,13 @@ if __name__ == "__main__":
     raw_img = cv2.imread(image_dir)
 
     depth = DA.eval(raw_img) # HxW raw depth map in numpy
-    # depth = DA.depth2image(depth, colormap='nipy_spectral')
+    depth = DA.depth2image(depth, colormap='nipy_spectral')
 
-    depth = ( depth / np.median(depth) ) * 2.0 
-
-
-    depth = imgviz.depth2rgb(depth, min_value=0.3, max_value=5.0)
-    depth = torch.from_numpy(depth)
-    depth = torch.permute(depth, (2, 0, 1)).float()
-    depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
-    # rgb = o3d.geometry.Image(depth)
+    # depth = ( depth / np.median(depth) ) * 2.0
+    # depth = imgviz.depth2rgb(depth, min_value=0.3, max_value=5.0)
+    # depth = torch.from_numpy(depth)
+    # depth = torch.permute(depth, (2, 0, 1)).float()
+    # depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
 
 
     cv2.imshow('raw-image', raw_img)
