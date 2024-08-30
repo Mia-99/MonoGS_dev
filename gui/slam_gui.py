@@ -210,7 +210,7 @@ class SLAM_GUI:
         tabs = gui.TabControl()
 
         tab_info = gui.Vert(0, tab_margins)
-        self.calib_info = gui.Label("Calibration: ")
+        self.calib_info = gui.Label("Calibration: \n\n\n\n")
         tab_info.add_child(self.calib_info)        
         self.output_info = gui.Label("Number of Gaussians: ")
         tab_info.add_child(self.output_info)
