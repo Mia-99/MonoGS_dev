@@ -81,18 +81,23 @@ if __name__ == "__main__":
 
 
 
-    use_colmap_point_cloud = True
 
 
     image_dir = "/home/fang/SURGAR/Colmap_Test/Fountain/images"
+    
+    use_pcd_from_colmap_sparse = True
+    use_pcd_from_depth_prediction = False
+
+
 
 
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
-    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = 5.0,  use_same_calib = True)
-        
+    downsample_scale = 4.0
+    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
+    
     
     print(f"scale_info = {scale_info}")
     cameras_extent = scale_info["radius"]
@@ -100,25 +105,43 @@ if __name__ == "__main__":
 
     # initialize 3D Gaussians
     gaussians = GaussianModel(sh_degree=0)
+    gaussians.spatial_lr_scale = cameras_extent
     
-    if use_colmap_point_cloud:
+
+    positions = None
+    colors = None
+
+    if use_pcd_from_colmap_sparse:
         positions, colors = reconstruction.getPointCloud()
-        pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
-        gaussians.create_from_pcd(pcd, cameras_extent)
 
-    else:
-        cam = viewpoint_stack[0]
+    pcd_downsample_factor = viewpoint_stack[0].image_height * viewpoint_stack[0].image_width * len(viewpoint_stack) / 10000
 
-        rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+    if use_pcd_from_depth_prediction:
 
-        # use depth prediction from a Neural network
-        depth_raw = DepthAnything().eval(rgb_raw)
+        DA = DepthAnything()
 
-        rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
-        depth = o3d.geometry.Image(depth_raw.astype(np.float32))
+        for cam in viewpoint_stack:
 
-        gaussians.create_from_image_and_depth(cam, rgb, depth, downsample_factor = 8, point_size = 0.01)
+            sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = cam.uid, downsample_scale = downsample_scale )
+            rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
 
+            # use depth prediction from a Neural network        
+            depth_raw = DA.eval(rgb_raw)
+            scale = DA.estimateScaleFactor(depth=depth_raw, uv_depth_stack=sparse_depth_stack)
+            depth_raw *= scale
+            print(f"depth scale correction = {scale}")
+
+            # RGB-D image to pcd in world frame
+            rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
+            depth = o3d.geometry.Image(depth_raw.astype(np.float32))
+            new_xyz, new_rgb = gaussians.create_pcd_from_image_and_depth(cam, rgb, depth, downsample_factor = pcd_downsample_factor)
+            
+            positions = np.concatenate((positions, new_xyz), axis=0) if positions is not None else new_xyz
+            colors = np.concatenate((colors, new_rgb), axis=0) if colors is not None else new_rgb
+
+
+    pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
+    gaussians.create_from_pcd(pcd, cameras_extent)
 
 
 

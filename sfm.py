@@ -123,7 +123,7 @@ class SFM(mp.Process):
                     keyframes=copy.deepcopy(self.viewpoint_stack),
                 )
             )
-            time.sleep(3)
+            time.sleep(1.5)
 
 
         sfm_gui.Log("start SfM optimization")
@@ -272,7 +272,10 @@ class SFM(mp.Process):
                 # mask = opacity
                 # Ll1 = l1_loss(image, gt_image)
                 Ll1 = l1_loss(image*mask, gt_image*mask)
-                loss = loss + (1.0 - self.opt.lambda_dssim) * Ll1   #+ self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
+                loss += (1.0 - self.opt.lambda_dssim) * Ll1
+                # enable SSIM loss when a good intialial reconstruction is attained
+                if iteration > 500:
+                    loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
 

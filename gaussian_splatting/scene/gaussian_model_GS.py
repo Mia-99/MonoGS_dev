@@ -167,9 +167,7 @@ class GaussianModel:
 
 
 
-    def create_from_image_and_depth(self, cam, rgb, depth, downsample_factor = 32, point_size = 0.01):
-
-        point_size = min(0.05, point_size * np.median(depth))
+    def create_pcd_from_image_and_depth(self, cam, rgb, depth, downsample_factor = 32):
 
         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
             rgb,
@@ -197,52 +195,9 @@ class GaussianModel:
         new_xyz = np.asarray(pcd_tmp.points)
         new_rgb = np.asarray(pcd_tmp.colors)
 
-        pcd = BasicPointCloud(
-            points=new_xyz, colors=new_rgb, normals=np.zeros((new_xyz.shape[0], 3))
-        )
-        self.ply_input = pcd
-
-        fused_point_cloud = torch.from_numpy(np.asarray(pcd.points)).float().cuda()
-        fused_color = RGB2SH(torch.from_numpy(np.asarray(pcd.colors)).float().cuda())
-        features = (
-            torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2))
-            .float()
-            .cuda()
-        )
-        features[:, :3, 0] = fused_color
-        features[:, 3:, 1:] = 0.0
-
-        dist2 = (
-            torch.clamp_min(
-                distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),
-                0.0000001,
-            )
-            * point_size
-        )
-        scales = torch.log(torch.sqrt(dist2))[..., None]
-        # if not self.isotropic:
-        #     scales = scales.repeat(1, 3)
-
-        rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
-        rots[:, 0] = 1
-        opacities = inverse_sigmoid(
-            0.5
-            * torch.ones(
-                (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
-            )
-        )
+        return new_xyz, new_rgb
 
 
-        self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
-        self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
-        self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
-        self._scaling = nn.Parameter(scales.requires_grad_(True))
-        self._rotation = nn.Parameter(rots.requires_grad_(True))
-        self._opacity = nn.Parameter(opacities.requires_grad_(True))
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
-
-
-        
 
 
 

@@ -54,7 +54,7 @@ class ColMap:
         print(self.reconstruction.summary())
 
         # dense reconstruction
-        pycolmap.undistort_images(mvs_path, output_path, image_dir)
+        # pycolmap.undistort_images(mvs_path, output_path, image_dir)
         # pycolmap.patch_match_stereo(mvs_path)  # requires compilation with CUDA
         # pycolmap.stereo_fusion(mvs_path / "dense.ply", mvs_path)
 
@@ -82,7 +82,7 @@ class ColMap:
     # Bring a world point X_world to camera frame
     # X_cam = R * X_world  +  t
     def getCamPosedImages(self):
-        pose_stack = {}
+        posed_image_stack = {}
         for image_id, image in self.reconstruction.images.items():
             pose = image.cam_from_world
             qvec = pose.rotation.quat
@@ -90,8 +90,8 @@ class ColMap:
             # [ R, T ] is a tranformation from world frame to camera frame
             R = self.qvec2rotmat( qvec )
             T = np.array( tvec )
-            pose_stack[image_id] = (R, T, image.name)
-        return pose_stack
+            posed_image_stack[image_id] = (R, T, image.name, image.camera_id)
+        return posed_image_stack
 
 
     def getCalibration(self):        
@@ -123,6 +123,19 @@ class ColMap:
             [2 * qvec[3] * qvec[1] - 2 * qvec[0] * qvec[2],   2 * qvec[2] * qvec[3] + 2 * qvec[0] * qvec[1],  1 - 2 * qvec[1]**2 - 2 * qvec[2]**2]])
 
 
+    def getSparseDepthFromImage (self, image_id,  downsample_scale = 1.0):
+        scale_factor = 1.0 / downsample_scale
+        points3d = self.reconstruction.points3D
+        pose = self.reconstruction.images[image_id].cam_from_world
+        image_points = self.reconstruction.images[image_id].points2D
+        sparse_depth_stack = []
+        for pt in image_points:
+            if pt.has_point3D():
+                xyz_cam = pose * points3d[ pt.point3D_id  ].xyz
+                depth = xyz_cam[2]
+                value = np.array( [ pt.xy[0]*scale_factor, pt.xy[1]*scale_factor, depth] )
+                sparse_depth_stack.append(value)
+        return sparse_depth_stack
 
 
 
@@ -132,10 +145,10 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_cal
     camera_stack = []
     camera_centers = []
     calib_stack, avg_K, avg_kappa = colmap.getCalibration()
-    posed_img_stack = colmap.getCamPosedImages()
+    posed_image_stack = colmap.getCamPosedImages()
 
-    for idx, item in posed_img_stack.items():
-        R, T, imgname = item
+    for image_id, item in posed_image_stack.items():
+        R, T, imgname, camera_id = item
         
         image_path = os.path.join(colmap.image_dir, os.path.basename(imgname))
         image = Image.open(image_path)
@@ -156,7 +169,7 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_cal
             cy = avg_K[1, 2]  / downsample_scale
             kappa = avg_kappa / downsample_scale
         else:
-            K, kappa = calib_stack[idx]
+            K, kappa = calib_stack[camera_id]
             fx = K[0, 0]  / downsample_scale
             fy = K[1, 1]  / downsample_scale
             cx = K[0, 2]  / downsample_scale
@@ -164,7 +177,7 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_cal
             kappa = kappa / downsample_scale
 
         cam = Camera (
-                    uid = idx,
+                    uid = image_id,
                     color = gt_image,
                     depth = None,
                     image_height = image_height,
@@ -207,6 +220,8 @@ if __name__ == "__main__":
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
 
+
+
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud.  3. Calibrations
     positions, colors = reconstruction.getPointCloud()
     posed_img_stack = reconstruction.getCamPosedImages()
@@ -215,7 +230,8 @@ if __name__ == "__main__":
     # interface to 3DGS
     pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
- 
+
+    # sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = 1)
 
 
     try:
@@ -240,9 +256,9 @@ if __name__ == "__main__":
         
         
         # add cameras
-        for idx, item in posed_img_stack.items():
-            R, T, imgname = item
-            K, kappa = calib_stack[idx]
+        for image_id, item in posed_img_stack.items():
+            R, T, imgname, camera_id = item
+            K, kappa = calib_stack[camera_id]
             intrinsic = K            
             extrinsic = np.eye(4)
             extrinsic[:3, :3] = R

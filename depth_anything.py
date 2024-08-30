@@ -5,7 +5,7 @@ import matplotlib
 import cv2
 
 import imgviz
-
+import statistics
 
 from submodules.DepthAnythingV2.depth_anything_v2.dpt import DepthAnythingV2
 
@@ -42,6 +42,16 @@ class DepthAnything:
             depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
         return depth
 
+    @staticmethod
+    def estimateScaleFactor (depth, uv_depth_stack):
+        scale_stack = []
+        for uv_d in  uv_depth_stack:
+            x = int(round(uv_d[0]))
+            y = int(round(uv_d[1]))
+            s = uv_d[2] / depth[y, x]
+            scale_stack.append(s)
+        return statistics.median (scale_stack)
+
 
 
 
@@ -65,6 +75,9 @@ if __name__ == "__main__":
     # depth = torch.from_numpy(depth)
     # depth = torch.permute(depth, (2, 0, 1)).float()
     # depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+
+    print (f"rgb image_shape   :   {raw_img.shape}")
+    print (f"depth image_shape :   {depth.shape}")
 
 
     cv2.imshow('raw-image', raw_img)
