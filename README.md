@@ -7,8 +7,10 @@
 - Ubuntu 22.04
 - nvidia-driver-535
 - cuda-toolkit 11.8
+- Python 3.9
 
-Dependencies.
+
+Dependencies
 ```
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118
@@ -37,11 +39,11 @@ pip install pycolmap
 
 ## Installation
 ```
-git clone https://github.com/muskie82/MonoGS.git --recursive
+git clone git@github.com:FangBai-Surgar/MonoGS.git --recursive
 cd MonoGS
 ```
 
-Setup.
+Setup
 ```
 pip install submodules/simple-knn
 pip install submodules/diff-gaussian-rasterization
