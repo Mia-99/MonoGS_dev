@@ -86,7 +86,7 @@ if __name__ == "__main__":
     image_dir = "/home/fang/SURGAR/Colmap_Test/Fountain/images"
     
     use_pcd_from_colmap_sparse = True
-    use_pcd_from_depth_prediction = False
+    use_pcd_from_depth_prediction = True
 
 
 

@@ -252,7 +252,7 @@ if __name__ == "__main__":
 
         vis.add_geometry(pcd)
         opt = vis.get_render_option()
-        opt.point_show_normal = True
+        # opt.point_show_normal = True
         
         
         # add cameras

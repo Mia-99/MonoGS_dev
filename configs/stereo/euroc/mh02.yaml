@@ -1,7 +1,7 @@
 inherit_from: "configs/stereo/euroc/base_config.yaml"
 
 Dataset:
-  dataset_path: "datasets/euroc/mh02/"
+  dataset_path: "/hdd/slam/euroc/mh02/"
   Calibration:
     cam0:
       raw:
