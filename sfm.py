@@ -51,6 +51,8 @@ from depth_anything import DepthAnything
 
 from optimizers import CalibrationOptimizer, PoseOptimizer
 
+from matplotlib import pyplot as plt
+
 
 
 try:
@@ -193,6 +195,7 @@ class SFM(mp.Process):
 
             if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 100 == 0:
                 self.calibration_optimizer.update_focal_learning_rate(lr = None, scale = 0.1)
+                self.calibration_optimizer.update_kappa_learning_rate(lr = None, scale = 0.1)
 
 
             self.gaussians.update_learning_rate(iteration)
@@ -286,7 +289,21 @@ class SFM(mp.Process):
                     if forzen_states:
                         time.sleep(0.1)
 
-                    
+
+
+        focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics()
+        plt.rcParams['text.usetex'] = True
+        for focal, focal_grad in zip(focal_stack, focal_grad_stack):
+            plt.scatter(focal[:50], focal_grad[:50])
+        plt.title(r"$L(f) = af^2+bf+c  \Leftrightarrow \nabla L(f) = 2 a f + b $")
+        plt.xlabel(r"focal")
+        plt.ylabel(r"$\nabla L(f)$")
+        plt.show()
+        
+
+
+
+
         sfm_gui.Log(f"SfM optimization complete with {iteration} iterations.")
 
         if self.use_gui:

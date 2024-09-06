@@ -4,6 +4,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 
 from utils.pose_utils import update_pose
 
+import numpy as np
 
 
 
@@ -25,6 +26,9 @@ class CalibrationOptimizer:
         self.__init_optimizers()
         self.zero_grad()
 
+
+        self.focal_grad_stack = []
+        self.focal_stack = []
 
 
 
@@ -94,15 +98,32 @@ class CalibrationOptimizer:
 
     def focal_step(self):
         self.__update_focal_gradients()
+
+        focal_grad_vec = []
+        focal_vec = []
+
         self.focal_optimizer.step()
         for calib_id, cam_stack in self.calibration_groups.items():
             focal_delta = self.focal_delta_groups [ calib_id ].data.cpu().numpy()[0]
             for viewpoint_cam in cam_stack:
+                focal = viewpoint_cam.fx
                 viewpoint_cam.fx += focal_delta
                 viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta
             focal_grad  = self.focal_delta_groups [ calib_id ].grad.cpu().numpy()[0]
             print(f"\n\tfocal_update = {focal_delta},\tgradient = {focal_grad}")
+                        
+            focal_grad_vec.append(focal_grad)
+            focal_vec.append(focal)
 
+        self.focal_grad_stack.append(np.array(focal_grad_vec))
+        self.focal_stack.append(np.array(focal_vec))
+
+        # if np.linalg.norm( np.array(focal_grad_vec) ) < 0.00001:
+        #     self.update_focal_learning_rate(lr=0.001)
+        # if np.linalg.norm( np.array(focal_grad_vec) ) < 0.000001:
+        #     self.update_focal_learning_rate(lr=0.0001)
+        # if np.linalg.norm( np.array(focal_grad_vec) ) < 0.0000001:
+        #     self.update_focal_learning_rate(lr=0.00001)
 
 
     def kappa_step(self):
@@ -136,7 +157,7 @@ class CalibrationOptimizer:
                 param_group["lr"] = lr
             if scale is not None:
                 lr = param_group["lr"]
-                param_group["lr"] = scale * lr if lr > 0.001 else lr
+                param_group["lr"] = scale * lr if lr > 0.0001 else lr
         print(f"\nfocal_optimizer.param_groups:\n\t{self.focal_optimizer.param_groups}\n")
 
 
@@ -147,12 +168,15 @@ class CalibrationOptimizer:
                 param_group["lr"] = lr
             if scale is not None:
                 lr = param_group["lr"]
-                param_group["lr"] = scale * lr if lr > 0.0001 else lr
+                param_group["lr"] = scale * lr if lr > 0.00001 else lr
         print(f"\nkappa_optimizer.param_groups:\n\t{self.kappa_optimizer.param_groups}\n")
 
 
 
-
+    def get_focal_statistics (self):
+        focal_grad_stack  = np.array(self.focal_grad_stack).transpose()
+        focal_stack = np.array(self.focal_stack).transpose()
+        return focal_stack, focal_grad_stack
 
 
 
