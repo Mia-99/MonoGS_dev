@@ -109,6 +109,9 @@ class Camera(nn.Module):
             self.data_device = torch.device("cuda")
 
 
+        self.calibration_identifier = 0
+
+
         # backup
         self.R_gt = R
         self.T_gt = T

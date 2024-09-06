@@ -49,6 +49,8 @@ from utils.multiprocessing_utils import FakeQueue, clone_obj
 from depth_anything import DepthAnything
 
 
+from optimizers import CalibrationOptimizer, PoseOptimizer
+
 
 
 try:
@@ -61,7 +63,10 @@ except ImportError:
 
 
 
+
+
 class SFM(mp.Process):
+
 
     def __init__(self, pipe = None, q_main2vis = None, q_vis2main = None, use_gui = True, viewpoint_stack = None, gaussians = None, opt = None, cameras_extent = None) -> None:
         self.pipe = pipe
@@ -90,39 +95,45 @@ class SFM(mp.Process):
         self.depth_scale = 10
 
 
+        self.calibration_optimizer = None
+        self.pose_optimizer = None
 
-    def updateCalibration(self, flag=False):
-        focal_delta = torch.zeros(1, device=self.viewpoint_stack[0].device)
-        kappa_delta = torch.zeros(1, device=self.viewpoint_stack[0].device)
-        for viewpoint_cam in self.viewpoint_stack:
-            focal_delta += viewpoint_cam.cam_focal_delta
-            kappa_delta += viewpoint_cam.cam_kappa_delta
-            # Don't forget to zero this vector every iteration. Otherwise the gradient will accumulate over iterations
-            viewpoint_cam.cam_focal_delta.data.fill_(0)
-            viewpoint_cam.cam_kappa_delta.data.fill_(0)
 
-        if flag == True:
-            focal_delta = focal_delta.cpu().numpy()[0]
-            kappa_delta = kappa_delta.cpu().numpy()[0]
-            for viewpoint_cam in self.viewpoint_stack:
-                viewpoint_cam.fx += focal_delta
-                viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta
-                viewpoint_cam.kappa += kappa_delta
-            print(f"update calibration: focal_delta = {focal_delta},  kappa_delta = {kappa_delta}")
+
+
+    def push_to_gui (self, cam_cnt):
+        # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
+
+        # use depth prediction from a Neural network                    
+        cv_img = (self.viewpoint_stack[cam_cnt].original_image*255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        depth = self.depth_anything.eval(cv_img)
+
+        self.q_main2vis.put(
+            gui_utils.GaussianPacket(
+                gaussians=self.gaussians,
+                keyframes=copy.deepcopy(self.viewpoint_stack),
+                current_frame=clone_obj(self.viewpoint_stack[cam_cnt]),
+                gtcolor=self.viewpoint_stack[cam_cnt].original_image,
+                gtdepth=depth,
+            )
+        )
+        time.sleep(0.001)
+
 
 
 
     def optimize (self):
 
+        if self.calibration_optimizer is None:
+            self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack)
+
+        if self.pose_optimizer is None:
+            self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
+
+
         cam_cnt = 0
         if self.use_gui:
-            self.q_main2vis.put(
-                gui_utils.GaussianPacket(
-                    gaussians=self.gaussians,
-                    current_frame=clone_obj(self.viewpoint_stack[cam_cnt]),
-                    keyframes=copy.deepcopy(self.viewpoint_stack),
-                )
-            )
+            self.push_to_gui(cam_cnt)
             time.sleep(1.5)
 
 
@@ -140,51 +151,6 @@ class SFM(mp.Process):
         ema_loss_for_log = 0.0
         progress_bar = tqdm(range(first_iter, self.opt.iterations), desc="Training progress")
         first_iter += 1
-
-
-
-        # optimize pose
-        pose_opt_params = []
-        for viewpoint_cam in self.viewpoint_stack:
-            pose_opt_params.append(
-                {
-                    "params": [viewpoint_cam.cam_rot_delta],
-                    "lr": 0.003,
-                    "name": "rot_{}".format(viewpoint_cam.uid),
-                }
-            )
-            pose_opt_params.append(
-                {
-                    "params": [viewpoint_cam.cam_trans_delta],
-                    "lr": 0.001,
-                    "name": "trans_{}".format(viewpoint_cam.uid),
-                }
-            )
-        pose_optimizer = torch.optim.Adam(pose_opt_params)
-        pose_optimizer.zero_grad()
-
-
-
-        # optimize calibration
-        calib_opt_params = []
-        for viewpoint_cam in self.viewpoint_stack:
-            calib_opt_params.append(
-                {
-                    "params": [viewpoint_cam.cam_focal_delta],
-                    "lr": 0.1,
-                    "name": "calibration_f_{}".format(viewpoint_cam.uid),
-                }
-            )
-            if self.allow_lens_distortion:
-                calib_opt_params.append(
-                    {
-                        "params": [viewpoint_cam.cam_kappa_delta],
-                        "lr": 0.001,
-                        "name": "calibration_k_{}".format(viewpoint_cam.uid),
-                    }
-                )
-        calib_optimizer = torch.optim.NAdam(calib_opt_params)
-        calib_optimizer.zero_grad()
 
 
 
@@ -215,32 +181,18 @@ class SFM(mp.Process):
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
-                for param_group in calib_optimizer.param_groups:
-                    if "calibration_f_" in param_group["name"]:
-                        param_group["lr"] = 2.0  # start from a large leraning rate as we modify focal abruptly.
+
+                self.calibration_optimizer.update_focal_learning_rate(lr = 2.0)  # start from a large leraning rate as we modify focal abruptly.
 
                 if self.use_gui:
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
-                    depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
-                    self.q_main2vis.put(
-                        gui_utils.GaussianPacket(
-                            gaussians=self.gaussians,
-                            keyframes=copy.deepcopy(self.viewpoint_stack),
-                            current_frame=clone_obj(self.viewpoint_stack[cam_cnt]),
-                            gtcolor=self.viewpoint_stack[cam_cnt].original_image,
-                            gtdepth=depth,
-                        )
-                    )
-                    time.sleep(0.001)
+                    self.push_to_gui(cam_cnt)
                 time.sleep(3)
 
 
 
             if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 100 == 0:
-                for param_group in calib_optimizer.param_groups:
-                    if "calibration_f_" in param_group["name"]:
-                        lr = param_group["lr"]
-                        param_group["lr"] = 0.1 * lr if lr > 0.01 else lr
+                self.calibration_optimizer.update_focal_learning_rate(lr = None, scale = 0.1)
 
 
             self.gaussians.update_learning_rate(iteration)
@@ -253,7 +205,7 @@ class SFM(mp.Process):
                 self.gaussians.oneupSHdegree()
 
 
-
+            # Loss function
             loss = 0.0
             for k in range(len(self.viewpoint_stack)):
 
@@ -278,6 +230,7 @@ class SFM(mp.Process):
                     loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
         
             loss.backward()
+
 
 
 
@@ -311,17 +264,14 @@ class SFM(mp.Process):
 
                 # Optimizer step
                 if self.require_calibration and iteration > 0 and iteration < self.opt.iterations and iteration >= self.start_calib_iter:
-                    calib_optimizer.step()
-                    self.updateCalibration(flag = True)
-                    calib_optimizer.zero_grad()
+                    self.calibration_optimizer.focal_step()
+                    self.calibration_optimizer.kappa_step()
+                    self.calibration_optimizer.zero_grad()
 
                 # Optimizer step
                 if iteration > 0 and iteration < self.opt.iterations and not forzen_states:
-                    pose_optimizer.step()
-                    for viewpoint_cam in self.viewpoint_stack:
-                        if viewpoint_cam.uid != 0:
-                            update_pose(viewpoint_cam)
-                    pose_optimizer.zero_grad()
+                    self.pose_optimizer.step()
+                    self.pose_optimizer.zero_grad()
 
                 # Optimizer step
                 if iteration > 0 and iteration < self.opt.iterations and not forzen_states:
@@ -330,24 +280,9 @@ class SFM(mp.Process):
                 
 
                 if self.use_gui and (iteration % 10 == 0 or forzen_states):
-                    # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
-                    # img = (self.viewpoint_stack[cam_cnt].original_image*255).cpu().squeeze(0).numpy()
-                    # cv_img = img.transpose(1, 2, 0)
-                    # cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-                    cv_img = (self.viewpoint_stack[cam_cnt].original_image*255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
-                    # use depth prediction from a Neural network                    
-                    depth = self.depth_anything.eval(cv_img)
-                    self.q_main2vis.put(
-                        gui_utils.GaussianPacket(
-                            gaussians=self.gaussians,
-                            keyframes=copy.deepcopy(self.viewpoint_stack),
-                            current_frame=clone_obj(self.viewpoint_stack[cam_cnt]),
-                            gtcolor=self.viewpoint_stack[cam_cnt].original_image,
-                            gtdepth=depth,
-                        )
-                    )
-                    time.sleep(0.001)
+                    self.push_to_gui(cam_cnt)
+
                     if forzen_states:
                         time.sleep(0.1)
 
