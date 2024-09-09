@@ -226,8 +226,11 @@ class SFM(mp.Process):
                 mask = (gt_image.sum(dim=0) > self.rgb_boundary_threshold)
                 # mask = opacity
                 # Ll1 = l1_loss(image, gt_image)
-                Ll1 = l1_loss(image*mask, gt_image*mask)
-                loss += (1.0 - self.opt.lambda_dssim) * Ll1
+                # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
+                huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+                # Ll1 = l1_loss(image*mask, gt_image*mask)  
+                # loss += (1.0 - self.opt.lambda_dssim) * Ll1
+                loss += (1.0 - self.opt.lambda_dssim) * huber_loss_function(image*mask, gt_image*mask)
                 # enable SSIM loss when a good intialial reconstruction is attained
                 if iteration > 500:
                     loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
@@ -354,7 +357,7 @@ if __name__ == "__main__":
 
 
 
-    opt.iterations = 1000
+    opt.iterations = 700
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
