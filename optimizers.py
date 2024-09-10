@@ -96,13 +96,21 @@ class CalibrationOptimizer:
 
 
 
-    def focal_step(self):
+    def focal_step(self, loss=None):
         self.__update_focal_gradients()
 
         focal_grad_vec = []
         focal_vec = []
 
-        self.focal_optimizer.step()
+        # L-BFGS closure
+        def closure():
+            return loss
+        
+        if type(self.focal_optimizer).__name__ == 'LBFGS':
+            self.focal_optimizer.step(closure) # to use LBFGS
+        else:
+            self.focal_optimizer.step()
+
         for calib_id, cam_stack in self.calibration_groups.items():
             focal_delta = self.focal_delta_groups [ calib_id ].data.cpu().numpy()[0]
             for viewpoint_cam in cam_stack:
@@ -177,10 +185,6 @@ class CalibrationOptimizer:
         focal_grad_stack  = np.array(self.focal_grad_stack).transpose()
         focal_stack = np.array(self.focal_stack).transpose()
         return focal_stack, focal_grad_stack
-
-
-
-
 
 
 

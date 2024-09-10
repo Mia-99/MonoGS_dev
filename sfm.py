@@ -201,7 +201,7 @@ class SFM(mp.Process):
             self.gaussians.update_learning_rate(iteration)
 
 
-            forzen_states = ( iteration > self.start_calib_iter and iteration < self.start_calib_iter + 50 )
+            frozen_states = ( iteration > self.start_calib_iter and iteration < self.start_calib_iter + 50 )
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
             if iteration % 1000 == 0:
@@ -226,11 +226,14 @@ class SFM(mp.Process):
                 mask = (gt_image.sum(dim=0) > self.rgb_boundary_threshold)
                 # mask = opacity
                 # Ll1 = l1_loss(image, gt_image)
+
                 # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
                 huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+                loss += (1.0 - self.opt.lambda_dssim) * huber_loss_function(image*mask, gt_image*mask)
+
                 # Ll1 = l1_loss(image*mask, gt_image*mask)  
                 # loss += (1.0 - self.opt.lambda_dssim) * Ll1
-                loss += (1.0 - self.opt.lambda_dssim) * huber_loss_function(image*mask, gt_image*mask)
+
                 # enable SSIM loss when a good intialial reconstruction is attained
                 if iteration > 500:
                     loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
@@ -270,26 +273,27 @@ class SFM(mp.Process):
 
                 # Optimizer step
                 if self.require_calibration and iteration > 0 and iteration < self.opt.iterations and iteration >= self.start_calib_iter:
-                    self.calibration_optimizer.focal_step()
-                    self.calibration_optimizer.kappa_step()
+                    self.calibration_optimizer.focal_step(loss)
+                    if not frozen_states:
+                        self.calibration_optimizer.kappa_step()
                     self.calibration_optimizer.zero_grad()
 
                 # Optimizer step
-                if iteration > 0 and iteration < self.opt.iterations and not forzen_states:
+                if iteration > 0 and iteration < self.opt.iterations and not frozen_states:
                     self.pose_optimizer.step()
                     self.pose_optimizer.zero_grad()
 
                 # Optimizer step
-                if iteration > 0 and iteration < self.opt.iterations and not forzen_states:
+                if iteration > 0 and iteration < self.opt.iterations and not frozen_states:
                     self.gaussians.optimizer.step()
                     self.gaussians.optimizer.zero_grad(set_to_none = True)
                 
 
-                if self.use_gui and (iteration % 10 == 0 or forzen_states):
+                if self.use_gui and (iteration % 10 == 0 or frozen_states):
                     cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
                     self.push_to_gui(cam_cnt)
 
-                    if forzen_states:
+                    if frozen_states:
                         time.sleep(0.1)
 
 
