@@ -51,6 +51,8 @@ from depth_anything import DepthAnything
 
 from optimizers import CalibrationOptimizer, PoseOptimizer
 
+from gaussian_scale_space import image_conv_gaussian_separable
+
 from matplotlib import pyplot as plt
 
 
@@ -227,9 +229,13 @@ class SFM(mp.Process):
                 # mask = opacity
                 # Ll1 = l1_loss(image, gt_image)
 
+                # Gaussian scale space
+                image_scale_t = image_conv_gaussian_separable(image, sigma=50, epsilon=0.01)
+                gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=50, epsilon=0.01)
+
                 # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
                 huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
-                loss += (1.0 - self.opt.lambda_dssim) * huber_loss_function(image*mask, gt_image*mask)
+                loss += (1.0 - self.opt.lambda_dssim) * huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
 
                 # Ll1 = l1_loss(image*mask, gt_image*mask)  
                 # loss += (1.0 - self.opt.lambda_dssim) * Ll1

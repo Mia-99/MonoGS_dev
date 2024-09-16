@@ -95,7 +95,7 @@ if __name__ == "__main__":
     reconstruction = ColMap(image_dir)
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
-    downsample_scale = 4.0
+    downsample_scale = 2**2
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
     
     

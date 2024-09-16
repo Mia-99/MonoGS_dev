@@ -15,5 +15,5 @@ wandb
 datasets
 result*
 *.txt
-test.py
+test_*.py
 screenshots
