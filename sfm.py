@@ -230,7 +230,7 @@ class SFM(mp.Process):
                 # Ll1 = l1_loss(image, gt_image)
 
                 # Gaussian scale space
-                scale_t = 1
+                scale_t = 10
                 image_scale_t = image_conv_gaussian_separable(image, sigma=scale_t, epsilon=0.01)
                 gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=scale_t, epsilon=0.01)
 
@@ -310,10 +310,9 @@ class SFM(mp.Process):
 
 
         focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics()
-        plt.rcParams['text.usetex'] = True
+        
         for focal, focal_grad in zip(focal_stack, focal_grad_stack):
-            plt.scatter(focal[:50], focal_grad[:50])
-            LineDetection(focal[1:50], focal_grad[1:50])
+            LineDetection(focal[:80], focal_grad[:80])
          
         
 
@@ -370,7 +369,7 @@ if __name__ == "__main__":
 
 
 
-    opt.iterations = 700
+    opt.iterations = 300
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49

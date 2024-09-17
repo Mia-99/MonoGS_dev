@@ -13,48 +13,66 @@ import matplotlib.pyplot as plt
 
 class LineDetection:
 
-    def __init__(self, xdata, ydata, deg = 7) -> None:
+    def __init__(self, xdata, ydata, deg = 3) -> None:
 
-        self._Chebyshev_poly = Chebyshev.fit(xdata, ydata, deg=deg)
-
-        self.poly = self._Chebyshev_poly.convert(kind=Polynomial, domain=self._Chebyshev_poly.domain,  window=self._Chebyshev_poly.window)
-
+        self.poly = Chebyshev.fit(xdata, ydata, deg=deg)
         self.poly_deriv = self.poly.deriv(1)
-
-        self.slopes = self.poly_deriv(xdata)
-
-
-        plt.plot(xdata, ydata, 'o')
-
-        xx, yy = self._Chebyshev_poly.linspace()
-        plt.plot(xx, yy, '+')
-
-        xxc, yyc = self.poly.linspace()
-        plt.plot(xxc, yyc, lw=2)
+        self.ygrad = self.poly_deriv(xdata) # 2*a
 
 
+        newton_update = - ydata / ( self.ygrad )
+        newton_est_opt = xdata + newton_update
 
 
+        print(f"xdata = {xdata}\n")
+        print(f"ydata = {ydata}\n")
+        print(f"ygrad = 2a = {self.ygrad}\n")
+        print(f"newton_update = {newton_update}\n")
+        print(f"newton_estimate_optimal = {newton_est_opt}\n")
 
-        plt.title(r"$L(f) = af^2+bf+c  \Leftrightarrow \nabla L(f) = 2 a f + b $")
-        plt.xlabel(r"focal")
+
+        plt.rcParams['text.usetex'] = True
+        fig = plt.figure(figsize=(8, 4))
+
+        plt.subplot(121)
+        plt.plot(xdata, ydata, '+')
+        plt.scatter(xdata[:50], ydata[:50])
+        xx, yy = self.poly.linspace()
+        plt.plot(xx, yy, lw=2)
+        plt.title(r"$\nabla L(f) = 2 a f + b $")
+        plt.xlabel(r"current focal")
         plt.ylabel(r"$\nabla L(f)$")
-        plt.show()
 
 
-        xxd, yyd = self.poly_deriv.linspace()
-        plt.plot(xxd, yyd, lw=5)
-        plt.plot(xdata, self.slopes, '*')
-        plt.show()
+        plt.subplot(122)
+        color1 = 'r'
+        color2 = 'b'
+        ax1 = plt.gca()
+        ax2 = ax1.twinx()
+        ax1.plot(xdata, newton_est_opt, lw=2, color=color1)
+        ax2.plot(xdata, newton_update, '*', color=color2)
+        plt.title(r"$f^{\star} = f - \nabla L(f) / (2a) $")
+        plt.xlabel(r"current focal", color='g')
+        ax1.set_ylabel(r"Newton estimated optimal focal", color=color1)
+        ax2.set_ylabel(r"Newton update", color=color2)
+        ax1.spines['left'].set_color (color1)
+        ax1.spines['right'].set_color (color2)
+        ax1.spines['left'].set_linewidth(3)
+        ax1.spines['right'].set_linewidth(3)
+        ax1.tick_params(colors=color1)
+        ax2.tick_params(colors=color2)
+
+        # tight axis
+        plt.autoscale(enable=True, axis='x', tight=True)
+        plt.autoscale(enable=True, axis='y', tight=False)
 
 
-        print(self.poly.coef)
-        print(self.poly.domain)
-        print(self.poly.window)
-        print(self.poly)
-        print(self.slopes)        
-        print(self.poly_deriv)
-        
+        # tight layout
+        plt.tight_layout(h_pad=3.0)
+
+        plt.savefig("/home/fang/focal_cost_function.pdf")
+
+        plt.show(block=True)
 
 
 
