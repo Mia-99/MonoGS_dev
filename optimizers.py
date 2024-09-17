@@ -6,6 +6,65 @@ from utils.pose_utils import update_pose
 
 import numpy as np
 
+from numpy.polynomial import Polynomial, Chebyshev
+
+import matplotlib.pyplot as plt
+
+
+class LineDetection:
+
+    def __init__(self, xdata, ydata, deg = 7) -> None:
+
+        self._Chebyshev_poly = Chebyshev.fit(xdata, ydata, deg=deg)
+
+        self.poly = self._Chebyshev_poly.convert(kind=Polynomial, domain=self._Chebyshev_poly.domain,  window=self._Chebyshev_poly.window)
+
+        self.poly_deriv = self.poly.deriv(1)
+
+        self.slopes = self.poly_deriv(xdata)
+
+
+        plt.plot(xdata, ydata, 'o')
+
+        xx, yy = self._Chebyshev_poly.linspace()
+        plt.plot(xx, yy, '+')
+
+        xxc, yyc = self.poly.linspace()
+        plt.plot(xxc, yyc, lw=2)
+
+
+
+
+
+        plt.title(r"$L(f) = af^2+bf+c  \Leftrightarrow \nabla L(f) = 2 a f + b $")
+        plt.xlabel(r"focal")
+        plt.ylabel(r"$\nabla L(f)$")
+        plt.show()
+
+
+        xxd, yyd = self.poly_deriv.linspace()
+        plt.plot(xxd, yyd, lw=5)
+        plt.plot(xdata, self.slopes, '*')
+        plt.show()
+
+
+        print(self.poly.coef)
+        print(self.poly.domain)
+        print(self.poly.window)
+        print(self.poly)
+        print(self.slopes)        
+        print(self.poly_deriv)
+        
+
+
+
+
+
+    def extractline (self):
+        pass
+
+
+
 
 
 class CalibrationOptimizer:

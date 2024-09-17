@@ -49,7 +49,7 @@ from utils.multiprocessing_utils import FakeQueue, clone_obj
 from depth_anything import DepthAnything
 
 
-from optimizers import CalibrationOptimizer, PoseOptimizer
+from optimizers import CalibrationOptimizer, PoseOptimizer, LineDetection
 
 from gaussian_scale_space import image_conv_gaussian_separable
 
@@ -203,7 +203,7 @@ class SFM(mp.Process):
             self.gaussians.update_learning_rate(iteration)
 
 
-            frozen_states = ( iteration > self.start_calib_iter and iteration < self.start_calib_iter + 50 )
+            frozen_states = ( iteration >= self.start_calib_iter and iteration < self.start_calib_iter + 50 )
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
             if iteration % 1000 == 0:
@@ -230,8 +230,9 @@ class SFM(mp.Process):
                 # Ll1 = l1_loss(image, gt_image)
 
                 # Gaussian scale space
-                image_scale_t = image_conv_gaussian_separable(image, sigma=50, epsilon=0.01)
-                gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=50, epsilon=0.01)
+                scale_t = 1
+                image_scale_t = image_conv_gaussian_separable(image, sigma=scale_t, epsilon=0.01)
+                gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=scale_t, epsilon=0.01)
 
                 # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
                 huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
@@ -279,20 +280,24 @@ class SFM(mp.Process):
 
                 # Optimizer step
                 if self.require_calibration and iteration > 0 and iteration < self.opt.iterations and iteration >= self.start_calib_iter:
+                    print(f"focal step")
                     self.calibration_optimizer.focal_step(loss)
                     if not frozen_states:
+                        print(f"kappa step")
                         self.calibration_optimizer.kappa_step()
-                    self.calibration_optimizer.zero_grad()
+                self.calibration_optimizer.zero_grad() # clear gradient every iteration
 
                 # Optimizer step
                 if iteration > 0 and iteration < self.opt.iterations and not frozen_states:
+                    print(f"pose step")
                     self.pose_optimizer.step()
-                    self.pose_optimizer.zero_grad()
+                self.pose_optimizer.zero_grad() # clear gradient every iteration
 
                 # Optimizer step
                 if iteration > 0 and iteration < self.opt.iterations and not frozen_states:
+                    print(f"Gaussian step")
                     self.gaussians.optimizer.step()
-                    self.gaussians.optimizer.zero_grad(set_to_none = True)
+                self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
                 
 
                 if self.use_gui and (iteration % 10 == 0 or frozen_states):
@@ -308,10 +313,8 @@ class SFM(mp.Process):
         plt.rcParams['text.usetex'] = True
         for focal, focal_grad in zip(focal_stack, focal_grad_stack):
             plt.scatter(focal[:50], focal_grad[:50])
-        plt.title(r"$L(f) = af^2+bf+c  \Leftrightarrow \nabla L(f) = 2 a f + b $")
-        plt.xlabel(r"focal")
-        plt.ylabel(r"$\nabla L(f)$")
-        plt.show()
+            LineDetection(focal[1:50], focal_grad[1:50])
+         
         
 
 
