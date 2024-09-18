@@ -232,7 +232,7 @@ class SFM(mp.Process):
                 # Ll1 = l1_loss(image, gt_image)
 
                 # Gaussian scale space
-                scale_t = 10
+                scale_t = 50
                 image_scale_t = image_conv_gaussian_separable(image, sigma=scale_t, epsilon=0.01)
                 gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=scale_t, epsilon=0.01)
 

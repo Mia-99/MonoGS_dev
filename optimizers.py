@@ -26,8 +26,8 @@ class LineDetection:
         self.poly_deriv = self.poly.deriv(1)
 
         self.ygrad = self.poly_deriv(xdata) # 2*a per point estimate
-        self.hessian = self.ygrad[ len(self.ygrad) // 2  ] # 2*a global estimate
-
+        self.hessian = self.ygrad[ - len(self.ygrad) // 5 ] # 2*a global estimate. chose a value close to the end
+    
 
     def compute_newton_update (self):
         
