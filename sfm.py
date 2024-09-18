@@ -55,6 +55,8 @@ from gaussian_scale_space import image_conv_gaussian_separable
 
 from matplotlib import pyplot as plt
 
+import pathlib
+
 
 
 try:
@@ -312,7 +314,7 @@ class SFM(mp.Process):
         focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics()
         
         for focal, focal_grad in zip(focal_stack, focal_grad_stack):
-            LineDetection(focal[:80], focal_grad[:80])
+            LineDetection(focal[:80], focal_grad[:80]).plot_figure(fname = pathlib.Path.home()/( "focal_cost_function_scale"+str(scale_t)+".pdf" ) )
          
         
 
@@ -369,7 +371,7 @@ if __name__ == "__main__":
 
 
 
-    opt.iterations = 300
+    opt.iterations = 200
     opt.densification_interval = 50
     opt.opacity_reset_interval = 350
     opt.densify_from_iter = 49
