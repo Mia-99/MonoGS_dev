@@ -56,7 +56,7 @@ from gaussian_scale_space import image_conv_gaussian_separable
 from matplotlib import pyplot as plt
 
 import pathlib
-
+import rich
 
 
 try:
@@ -98,13 +98,12 @@ class SFM(mp.Process):
         self.cameras_extent = cameras_extent
 
         self.depth_anything = DepthAnything()
-        self.depth_scale = 10
 
 
         self.calibration_optimizer = None
         self.pose_optimizer = None
 
-
+        self.gaussian_scale_t = 50
 
 
     def push_to_gui (self, cam_cnt):
@@ -183,7 +182,7 @@ class SFM(mp.Process):
             # add noise to calibration to test the robustness
             if iteration == self.add_calib_noise_iter:
                 for viewpoint_cam in self.viewpoint_stack:
-                    focal = 650
+                    focal = 700 # gt = 580. tunning in range [400 - 700]
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
@@ -197,9 +196,9 @@ class SFM(mp.Process):
 
 
 
-            if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 100 == 0:
-                self.calibration_optimizer.update_focal_learning_rate(lr = None, scale = 0.1)
+            if iteration > self.start_calib_iter and (iteration - self.start_calib_iter) % 50 == 0:
                 self.calibration_optimizer.update_kappa_learning_rate(lr = None, scale = 0.1)
+                self.calibration_optimizer.update_focal_learning_rate(lr = None, scale = 0.1)
 
 
             self.gaussians.update_learning_rate(iteration)
@@ -210,6 +209,11 @@ class SFM(mp.Process):
             # Every 1000 its we increase the levels of SH up to a maximum degree
             if iteration % 1000 == 0:
                 self.gaussians.oneupSHdegree()
+
+
+            if self.calibration_optimizer.update_gaussian_scale_t:
+                self.gaussian_scale_t *= 0.1
+            
 
 
             # Loss function
@@ -231,10 +235,14 @@ class SFM(mp.Process):
                 # mask = opacity
                 # Ll1 = l1_loss(image, gt_image)
 
-                # Gaussian scale space
-                scale_t = 50
-                image_scale_t = image_conv_gaussian_separable(image, sigma=scale_t, epsilon=0.01)
-                gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=scale_t, epsilon=0.01)
+                # Gaussian scale space for focal length calibration
+                if frozen_states and self.gaussian_scale_t > 0.5:                    
+                    rich.print("[bold cyan]gaussian_scale_t: [/bold cyan]", self.gaussian_scale_t)
+                    image_scale_t = image_conv_gaussian_separable(image, sigma=self.gaussian_scale_t, epsilon=0.01)
+                    gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=self.gaussian_scale_t, epsilon=0.01)
+                else:
+                    image_scale_t = image
+                    gt_image_scale_t = gt_image
 
                 # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
                 huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
@@ -281,14 +289,14 @@ class SFM(mp.Process):
 
 
                 # Optimizer step
-                if self.require_calibration and iteration > 0 and iteration < self.opt.iterations and iteration >= self.start_calib_iter:
+                if self.require_calibration and iteration > 0 and iteration < 500 and iteration >= self.start_calib_iter:
                     print(f"focal step")
                     self.calibration_optimizer.focal_step(loss)
                     if not frozen_states:
                         print(f"kappa step")
                         self.calibration_optimizer.kappa_step()
                 self.calibration_optimizer.zero_grad() # clear gradient every iteration
-
+                
                 # Optimizer step
                 if iteration > 0 and iteration < self.opt.iterations and not frozen_states:
                     print(f"pose step")
@@ -311,10 +319,9 @@ class SFM(mp.Process):
 
 
 
-        focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics()
-        
+        focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics(all = True)
         for focal, focal_grad in zip(focal_stack, focal_grad_stack):
-            LineDetection(focal[:80], focal_grad[:80]).plot_figure(fname = pathlib.Path.home()/( "focal_cost_function_scale"+str(scale_t)+".pdf" ) )
+            LineDetection(focal[:80], focal_grad[:80]).plot_figure(fname = pathlib.Path.home()/( "focal_cost_function_scale"+str(self.gaussian_scale_t)+".pdf" ) )
          
         
 
