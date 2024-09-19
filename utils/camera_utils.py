@@ -56,6 +56,8 @@ class Camera(nn.Module):
         self.fy_init = self.fy
         self.kappa_init = self.kappa
 
+        self.calibration_identifier = 0
+
         self.cam_rot_delta = nn.Parameter(
             torch.zeros(3, requires_grad=True, device=device)
         )

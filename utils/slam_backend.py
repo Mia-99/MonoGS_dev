@@ -12,6 +12,8 @@ from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 
+from optimizers import CalibrationOptimizer
+
 
 class BackEnd(mp.Process):
     def __init__(self, config):
@@ -323,13 +325,17 @@ class BackEnd(mp.Process):
                         continue
                     update_pose(viewpoint)
                 # only do calibration if slam has been initialized
+                optimizable_view_stack = viewpoint_stack[:min(frames_to_optimize, len(current_window))]
                 if self.require_calibration and self.initialized:
-                    self.calibration_optimizers.step()
-                    self.calibration_optimizers.zero_grad(set_to_none=True)
-                    focal_delta, kappa_delta = self.getCalibrationUpdate(viewpoint_stack[:min(frames_to_optimize, len(current_window))])
+                    self.calibration_optimizers.focal_step()
+                    self.calibration_optimizers.kappa_step()
+                    # self.updateCalibration(viewpoint_stack[-1], 100, 0)
+                    print(f"current_window [kf_idx]: {current_window}")
+                self.calibration_optimizers.zero_grad()
+                    # focal_delta, kappa_delta = self.getCalibrationUpdate(viewpoint_stack[:min(frames_to_optimize, len(current_window))])
                     # update calibration of the most recent camera
-                    print(f"update calibration: focal_delta = {focal_delta},  kappa_delta = {kappa_delta}")
-                    self.updateCalibration(viewpoint_stack[-1], focal_delta, kappa_delta)
+                    # print(f"update calibration: focal_delta = {focal_delta},  kappa_delta = {kappa_delta}")
+
 
         return gaussian_split
 
@@ -453,6 +459,7 @@ class BackEnd(mp.Process):
 
                     pose_opt_params = []
                     calib_opt_params = []
+                    calib_opt_frames_stack = []
                     frames_to_optimize = self.config["Training"]["pose_window"]
                     iter_per_kf = self.mapping_itr_num if self.single_thread else 10
                     if not self.initialized:
@@ -466,7 +473,7 @@ class BackEnd(mp.Process):
                             iter_per_kf = 50 if self.live_mode else 300
                             Log("Performing initial BA for initialization")
                         else:
-                            iter_per_kf = self.mapping_itr_num
+                            iter_per_kf = self.mapping_itr_num                    
                     for cam_idx in range(len(self.current_window)):
                         if self.current_window[cam_idx] == 0:
                             continue
@@ -490,22 +497,23 @@ class BackEnd(mp.Process):
                                     "name": "trans_{}".format(viewpoint.uid),
                                 }
                             )
+                            calib_opt_frames_stack.append(viewpoint)                            
                             # add self-calibration params
-                            calib_opt_params.append(
-                                {
-                                    "params": [viewpoint.cam_focal_delta],
-                                    "lr": 0.01,
-                                    "name": "calibration_f_{}".format(viewpoint.uid),
-                                }
-                            )
-                            if self.allow_lens_distortion:
-                                calib_opt_params.append(
-                                    {
-                                        "params": [viewpoint.cam_kappa_delta],
-                                        "lr": 0.0001,
-                                        "name": "calibration_k_{}".format(viewpoint.uid),
-                                    }
-                                )
+                            # calib_opt_params.append(
+                            #     {
+                            #         "params": [viewpoint.cam_focal_delta],
+                            #         "lr": 0.01,
+                            #         "name": "calibration_f_{}".format(viewpoint.uid),
+                            #     }
+                            # )
+                            # if self.allow_lens_distortion:
+                            #     calib_opt_params.append(
+                            #         {
+                            #             "params": [viewpoint.cam_kappa_delta],
+                            #             "lr": 0.0001,
+                            #             "name": "calibration_k_{}".format(viewpoint.uid),
+                            #         }
+                            #     )
                         pose_opt_params.append(
                             {
                                 "params": [viewpoint.exposure_a],
@@ -521,7 +529,10 @@ class BackEnd(mp.Process):
                             }
                         )
                     self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
-                    self.calibration_optimizers = torch.optim.NAdam(calib_opt_params)
+                    # self.calibration_optimizers = torch.optim.NAdam(calib_opt_params)
+                    self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack)
+                    print(f"calibration optimizer append camera: {current_window}")
+
 
                     self.keyframe_optimizers.zero_grad()
                     self.calibration_optimizers.zero_grad()
