@@ -106,6 +106,9 @@ class SFM(mp.Process):
         self.gaussian_scale_t = 50
 
 
+        self.image_margin_mask = None
+
+
     def push_to_gui (self, cam_cnt):
         # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
 
@@ -134,6 +137,12 @@ class SFM(mp.Process):
 
         if self.pose_optimizer is None:
             self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
+
+        _, h, w = self.viewpoint_stack[0].original_image.shape
+        self.image_margin_mask = torch.zeros(h, w).cuda()
+        band_with = int(1.0 * self.gaussian_scale_t)
+        self.image_margin_mask[band_with:-band_with,  band_with:-band_with] = 1.0
+
 
 
         cam_cnt = 0
@@ -182,7 +191,7 @@ class SFM(mp.Process):
             # add noise to calibration to test the robustness
             if iteration == self.add_calib_noise_iter:
                 for viewpoint_cam in self.viewpoint_stack:
-                    focal = 700 # gt = 580. tunning in range [400 - 700]
+                    focal = 400 # gt = 580. tunning in range [400 - 700]
                     viewpoint_cam.fx = focal
                     viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
                     viewpoint_cam.kappa = 0.0
@@ -213,6 +222,9 @@ class SFM(mp.Process):
 
             if self.calibration_optimizer.update_gaussian_scale_t:
                 self.gaussian_scale_t *= 0.1
+                band_with = int(1.0 * self.gaussian_scale_t)
+                self.image_margin_mask[band_with:-band_with,  band_with:-band_with] = 1.0
+
             
 
 
@@ -240,6 +252,8 @@ class SFM(mp.Process):
                     rich.print("[bold cyan]gaussian_scale_t: [/bold cyan]", self.gaussian_scale_t)
                     image_scale_t = image_conv_gaussian_separable(image, sigma=self.gaussian_scale_t, epsilon=0.01)
                     gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=self.gaussian_scale_t, epsilon=0.01)
+                    # mask the image margin when peforming long range pixel matching
+                    mask = mask * self.image_margin_mask
                 else:
                     image_scale_t = image
                     gt_image_scale_t = gt_image
