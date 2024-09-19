@@ -325,37 +325,14 @@ class BackEnd(mp.Process):
                         continue
                     update_pose(viewpoint)
                 # only do calibration if slam has been initialized
-                optimizable_view_stack = viewpoint_stack[:min(frames_to_optimize, len(current_window))]
                 if self.require_calibration and self.initialized:
                     self.calibration_optimizers.focal_step()
                     self.calibration_optimizers.kappa_step()
-                    # self.updateCalibration(viewpoint_stack[-1], 100, 0)
-                    print(f"current_window [kf_idx]: {current_window}")
+                    print(f"calibration step. current_window [kf_idx]: {current_window}")
                 self.calibration_optimizers.zero_grad()
-                    # focal_delta, kappa_delta = self.getCalibrationUpdate(viewpoint_stack[:min(frames_to_optimize, len(current_window))])
-                    # update calibration of the most recent camera
-                    # print(f"update calibration: focal_delta = {focal_delta},  kappa_delta = {kappa_delta}")
-
 
         return gaussian_split
 
-    @staticmethod
-    def getCalibrationUpdate(viewpoint_stack):
-        focal = torch.zeros(1, device=viewpoint_stack[0].device)
-        kappa = torch.zeros(1, device=viewpoint_stack[0].device)
-        for viewpoint_cam in viewpoint_stack:
-            focal += viewpoint_cam.cam_focal_delta
-            kappa += viewpoint_cam.cam_kappa_delta
-            viewpoint_cam.cam_focal_delta.data.fill_(0)
-            viewpoint_cam.cam_kappa_delta.data.fill_(0)
-        focal = focal.cpu().numpy()[0]
-        kappa = kappa.cpu().numpy()[0]
-        return focal, kappa
-    @staticmethod
-    def updateCalibration(viewpoint_cam, focal, kappa):
-        viewpoint_cam.fx += focal
-        viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal
-        viewpoint_cam.kappa += kappa
 
 
     def color_refinement(self):
@@ -458,7 +435,6 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
                     pose_opt_params = []
-                    calib_opt_params = []
                     calib_opt_frames_stack = []
                     frames_to_optimize = self.config["Training"]["pose_window"]
                     iter_per_kf = self.mapping_itr_num if self.single_thread else 10
@@ -498,22 +474,7 @@ class BackEnd(mp.Process):
                                 }
                             )
                             calib_opt_frames_stack.append(viewpoint)                            
-                            # add self-calibration params
-                            # calib_opt_params.append(
-                            #     {
-                            #         "params": [viewpoint.cam_focal_delta],
-                            #         "lr": 0.01,
-                            #         "name": "calibration_f_{}".format(viewpoint.uid),
-                            #     }
-                            # )
-                            # if self.allow_lens_distortion:
-                            #     calib_opt_params.append(
-                            #         {
-                            #             "params": [viewpoint.cam_kappa_delta],
-                            #             "lr": 0.0001,
-                            #             "name": "calibration_k_{}".format(viewpoint.uid),
-                            #         }
-                            #     )
+
                         pose_opt_params.append(
                             {
                                 "params": [viewpoint.exposure_a],
@@ -529,10 +490,8 @@ class BackEnd(mp.Process):
                             }
                         )
                     self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
-                    # self.calibration_optimizers = torch.optim.NAdam(calib_opt_params)
                     self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack)
-                    print(f"calibration optimizer append camera: {current_window}")
-
+                    print(f"calibration optimizer initialization. current_window [kf_idx]: {current_window}")
 
                     self.keyframe_optimizers.zero_grad()
                     self.calibration_optimizers.zero_grad()
