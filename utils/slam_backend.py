@@ -151,7 +151,7 @@ class BackEnd(mp.Process):
         Log("Initialized map")
         return render_pkg
 
-    def map(self, current_window, prune=False, calibrate=False, fix_gaussian = False, iters=1):
+    def map(self, current_window, prune=False, calibrate=False, fix_gaussian = False, iters=1, force_prune = False):
         if len(current_window) == 0:
             return
 
@@ -251,7 +251,7 @@ class BackEnd(mp.Process):
 
                 # # compute the visibility of the gaussians
                 # # Only prune on the last iteration and when we have full window
-                if prune and not fix_gaussian:
+                if prune and (not fix_gaussian):
                     if len(current_window) == self.config["Training"]["window_size"]:
                         prune_mode = self.config["Training"]["prune_mode"]
                         prune_coviz = 3
@@ -273,6 +273,7 @@ class BackEnd(mp.Process):
                             )
                         if to_prune is not None and self.monocular:
                             self.gaussians.prune_points(to_prune.cuda())
+                            Log("gaussians.prune_points")
                             for idx in range((len(current_window))):
                                 current_idx = current_window[idx]
                                 self.occ_aware_visibility[current_idx] = (
@@ -297,13 +298,14 @@ class BackEnd(mp.Process):
                     self.iteration_count % self.gaussian_update_every
                     == self.gaussian_update_offset
                 )
-                if update_gaussian and (not fix_gaussian):
+                if ( update_gaussian and (not fix_gaussian) ) or force_prune:
                     self.gaussians.densify_and_prune(
                         self.opt_params.densify_grad_threshold,
                         self.gaussian_th,
                         self.gaussian_extent,
                         self.size_threshold,
                     )
+                    Log("gaussians.densify_and_prune")
                     gaussian_split = True
 
                 ## Opacity reset
@@ -444,6 +446,7 @@ class BackEnd(mp.Process):
 
                 elif data[0] == "calibration_change":
                     self.map(self.current_window, prune=True, calibrate=False, iters=10) # to perform excessive pruning
+                    self.map(self.current_window, prune=True, calibrate=False, iters=1, force_prune=True) # prune. force densification and split
                     self.map(self.current_window, prune=False, calibrate=False, iters=10) # optimize Gaussian parameters only
                     self.map(self.current_window, prune=True, calibrate=False, iters=1) # prune
                     self.push_to_frontend()
@@ -601,7 +604,7 @@ class BackEnd(mp.Process):
                         self.add_next_kf(cur_frame_idx, self.viewpoints[cur_frame_idx], depth_map=depth_map) 
                         self.map(self.current_window, calibrate=False, iters=iter_per_kf) # don't calibrate with one view. optimize gaussian
                         self.map(self.current_window, prune=True)
-                        self.push_to_frontend("keyframe")
+
 
                 else:
                     raise Exception("Unprocessed data", data)
