@@ -9,7 +9,9 @@ os.environ['MPLBACKEND'] = 'Agg'
 
 types=['mono']
 seqs = ["0"]
-versions = ['_v6']
+# versions = ['_300','_400','_500','_600','_700','_800']
+versions = ['_300_sp','_400_sp','_500_sp','_600_sp','_700_sp','_800_sp']
+# versions = ['_500']
 
 # Loop through each version and run the command
 for seq in seqs:
@@ -28,7 +30,8 @@ for seq in seqs:
                 # mkdire output folder
                 os.makedirs(f'./cmd_output/office{seq}', exist_ok=True)
                 output_file = f'./cmd_output/office{seq}/office{seq}_{version}.txt'
-                base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration --allow_lens_distortion | tee {output_file}"
+                # base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration --allow_lens_distortion | tee {output_file}"
+                base_command = f"python slam_cali.py --config {config_file_path} --eval"
                 
                 # Construct the full command
                 command = base_command.format(config_file=config_file, output_file=output_file)

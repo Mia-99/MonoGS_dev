@@ -55,10 +55,12 @@ class FrontEndCali(FrontEnd):
         # else:
         #     self.simulator = None
         path = config.get("Dataset", {}).get("intrinsic_filename", None)
-        self.simulator = Simulator(config["Dataset"]["dataset_path"] + '/' + path) if path is not None else None       
+        self.simulator = Simulator(config["Dataset"]["dataset_path"] + '/' + path) if path is not None else None
+
 
     def run(self):
         # assert self.dataset.num_imgs == self.simulator.fx.shape[0]
+        self.MODULE_TEST_CALIBRATION = True
         print(f"self.MODULE_TEST_CALIBRATION: {self.MODULE_TEST_CALIBRATION}")
         print(f"self.signal_calibration_change: {self.signal_calibration_change}")
         cur_frame_idx = 0
