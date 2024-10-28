@@ -324,8 +324,9 @@ class BackEnd(mp.Process):
                     self.calibration_optimizers.zero_grad(set_to_none=True)
 
                 # Pose update
-                self.keyframe_optimizers.step()
-                self.keyframe_optimizers.zero_grad(set_to_none=True)
+                if self.keyframe_optimizers is not None:
+                    self.keyframe_optimizers.step()
+                    self.keyframe_optimizers.zero_grad(set_to_none=True)
                 for cam_idx in range(min(frames_to_optimize, len(current_window))):
                     viewpoint = viewpoint_stack[cam_idx]
                     if viewpoint.uid == 0:

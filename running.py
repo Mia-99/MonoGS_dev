@@ -10,7 +10,7 @@ os.environ['MPLBACKEND'] = 'Agg'
 types=['mono']
 seqs = ["0"]
 # versions = ['_300','_400','_500','_600','_700','_800']
-versions = ['_300_sp','_400_sp','_500_sp','_600_sp','_700_sp','_800_sp']
+versions = ['_400_sp','_500_sp','_600_sp']
 # versions = ['_500']
 
 # Loop through each version and run the command

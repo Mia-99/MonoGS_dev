@@ -7,7 +7,8 @@ import torch.multiprocessing as mp
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gui import gui_utils
-from utils_cali.camera_cali_utils import CameraForCalibration as Camera
+# from utils_cali.camera_cali_utils import CameraForCalibration as Camera
+from utils.camera_utils import Camera
 from utils.eval_utils import save_gaussians
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
@@ -56,14 +57,31 @@ class FrontEndCali(FrontEnd):
         #     self.simulator = None
         path = config.get("Dataset", {}).get("intrinsic_filename", None)
         self.simulator = Simulator(config["Dataset"]["dataset_path"] + '/' + path) if path is not None else None
+        self.use_gt_pose = True
+    
+    def tracking_use_gt_poses(self, viewpoint):
+        viewpoint.R = viewpoint.R_gt
+        viewpoint.T = viewpoint.T_gt
+        render_pkg = render(
+            viewpoint, self.gaussians, self.pipeline_params, self.background
+        )
+        image, depth, opacity = (
+            render_pkg["render"],
+            render_pkg["depth"],
+            render_pkg["opacity"],
+        )
+        self.median_depth = get_median_depth(depth, opacity)
+
+        return render_pkg
 
 
     def run(self):
         # assert self.dataset.num_imgs == self.simulator.fx.shape[0]
-        self.MODULE_TEST_CALIBRATION = True
+        self.MODULE_TEST_CALIBRATION = False
         print(f"self.MODULE_TEST_CALIBRATION: {self.MODULE_TEST_CALIBRATION}")
         print(f"self.signal_calibration_change: {self.signal_calibration_change}")
         cur_frame_idx = 0
+        projection_matrix = None # projection_matrix is implemented as a property in Camera
         tic = torch.cuda.Event(enable_timing=True)
         toc = torch.cuda.Event(enable_timing=True)
 
@@ -114,12 +132,13 @@ class FrontEndCali(FrontEnd):
                     continue
 
                 viewpoint = Camera.init_from_dataset(
-                    self.dataset, cur_frame_idx
+                    self.dataset, cur_frame_idx, projection_matrix
                 )
 
                 viewpoint.compute_grad_mask(self.config)
 
-                if self.MODULE_TEST_CALIBRATION and self.simulator is not None:
+                # if self.MODULE_TEST_CALIBRATION and self.simulator is not None:
+                if self.simulator is not None:
                     viewpoint.calibration_identifier = self.simulator.cali_id[cur_frame_idx]
                     focal_ref = None if viewpoint.calibration_identifier == 0 else self.simulator.fx[cur_frame_idx]
                     viewpoint.fx_init = self.simulator.fx[cur_frame_idx]
@@ -133,7 +152,12 @@ class FrontEndCali(FrontEnd):
                 if len(self.cameras) > self.use_every_n_frames:
                     prev = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
                     viewpoint.update_calibration (prev.fx, prev.fy, prev.kappa) # use last frame calibration
-                    viewpoint.update_RT(prev.R, prev.T) # use last frame pose
+
+                    if self.use_gt_pose:
+                        viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt) # use last frame pose
+                    else:
+                        viewpoint.update_RT(prev.R, prev.T)
+
                     if viewpoint.calibration_identifier != prev.calibration_identifier:
                         if (not self.signal_calibration_change):
                             rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx}")
@@ -147,6 +171,10 @@ class FrontEndCali(FrontEnd):
                     if self.requested_keyframe > 0:
                         time.sleep(0.01)
                         continue
+                
+                # rich.print(f"FrontEnd  Tracking t_gt: [{viewpoint.uid}]: t = {[f'{x.item():.8f}' for x in (viewpoint.T_gt)]}")
+                # rich.print(f"FrontEnd  Tracking t   : [{viewpoint.uid}]: t = {[f'{x.item():.8f}' for x in (viewpoint.T)]}")
+                
                 
                 # if self.MODULE_TEST_CALIBRATION and self.signal_calibration_change:
                 #     if focal_ref is not None:
@@ -176,7 +204,10 @@ class FrontEndCali(FrontEnd):
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  beta = 0.0, learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False)
                     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 1.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
 
-                render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                if self.use_gt_pose:
+                    render_pkg = self.tracking_use_gt_poses(viewpoint)
+                else:
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
                     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
@@ -252,7 +283,6 @@ class FrontEndCali(FrontEnd):
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )
                     rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calibration_identifier}")
-
 
                 else:
                     self.cleanup(cur_frame_idx)

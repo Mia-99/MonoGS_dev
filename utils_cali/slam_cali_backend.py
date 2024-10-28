@@ -22,6 +22,7 @@ from utils.slam_backend import BackEnd
 class BackEndCali(BackEnd):
     def __init__(self, config):
         super().__init__(config)
+        self.use_gt_poses = True
 
     def run(self):
         while True:
@@ -58,7 +59,6 @@ class BackEndCali(BackEnd):
                     depth_map = data[3]
                     Log("Resetting the system")
                     self.reset()
-
                     self.viewpoints[cur_frame_idx] = viewpoint
                     self.add_next_kf(
                         cur_frame_idx, viewpoint, depth_map=depth_map, init=True
@@ -93,7 +93,17 @@ class BackEndCali(BackEnd):
 
                     self.viewpoints[cur_frame_idx] = viewpoint
                     self.current_window = current_window
-                    self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)               
+                    if (not self.signal_calibration_change):
+                        self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
+                        rich.print(f"[bold blue]BackEnd  AddKF depth_map:[/bold blue] [{cur_frame_idx}]")               
+                    else:
+                        pass
+                        # new_unique_kfIDs = torch.ones((new_xyz.shape[0])).int() * kf_id
+                        # new_n_obs = torch.zeros((new_xyz.shape[0])).int()
+                        # if new_kf_ids is not None:
+                        #     self.unique_kfIDs = torch.cat((self.unique_kfIDs, new_kf_ids)).int()
+                        # if new_n_obs is not None:
+                        #     self.n_obs = torch.cat((self.n_obs, new_n_obs)).int()                 
                     
                     pose_opt_params = []
                     calib_opt_frames_stack = []
@@ -116,43 +126,45 @@ class BackEndCali(BackEnd):
                             continue
                         viewpoint = self.viewpoints[current_window[cam_idx]]
                         if cam_idx < frames_to_optimize:
-                            pose_opt_params.append(
-                                {
-                                    "params": [viewpoint.cam_rot_delta],
-                                    "lr": self.config["Training"]["lr"]["cam_rot_delta"]
-                                    * 0.5,
-                                    "name": "rot_{}".format(viewpoint.uid),
-                                }
-                            )
-                            pose_opt_params.append(
-                                {
-                                    "params": [viewpoint.cam_trans_delta],
-                                    "lr": self.config["Training"]["lr"][
-                                        "cam_trans_delta"
-                                    ]
-                                    * 0.5,
-                                    "name": "trans_{}".format(viewpoint.uid),
-                                }
-                            )
+                            if not self.use_gt_poses:
+                                pose_opt_params.append(
+                                    {
+                                        "params": [viewpoint.cam_rot_delta],
+                                        "lr": self.config["Training"]["lr"]["cam_rot_delta"]
+                                        * 0.5,
+                                        "name": "rot_{}".format(viewpoint.uid),
+                                    }
+                                )
+                                pose_opt_params.append(
+                                    {
+                                        "params": [viewpoint.cam_trans_delta],
+                                        "lr": self.config["Training"]["lr"][
+                                            "cam_trans_delta"
+                                        ]
+                                        * 0.5,
+                                        "name": "trans_{}".format(viewpoint.uid),
+                                    }
+                                )
                             calib_opt_frames_stack.append(viewpoint)
                             calibration_identifier_cnt += 1 if viewpoint.calibration_identifier == current_calibration_identifier else 0
-
-                        pose_opt_params.append(
-                            {
-                                "params": [viewpoint.exposure_a],
-                                "lr": 0.01,
-                                "name": "exposure_a_{}".format(viewpoint.uid),
-                            }
-                        )
-                        pose_opt_params.append(
-                            {
-                                "params": [viewpoint.exposure_b],
-                                "lr": 0.01,
-                                "name": "exposure_b_{}".format(viewpoint.uid),
-                            }
-                        )
-                    self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
-                    self.keyframe_optimizers.zero_grad()
+                        if not self.use_gt_poses:
+                            pose_opt_params.append(
+                                {
+                                    "params": [viewpoint.exposure_a],
+                                    "lr": 0.01,
+                                    "name": "exposure_a_{}".format(viewpoint.uid),
+                                }
+                            )
+                            pose_opt_params.append(
+                                {
+                                    "params": [viewpoint.exposure_b],
+                                    "lr": 0.01,
+                                    "name": "exposure_b_{}".format(viewpoint.uid),
+                                }
+                            )
+                    if not self.use_gt_poses:
+                        self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
+                        self.keyframe_optimizers.zero_grad()
 
                     
                     if self.require_calibration and self.initialized and calibration_identifier_cnt >= 1 and current_calibration_identifier != 0:
@@ -162,6 +174,7 @@ class BackEndCali(BackEnd):
                         focal_ref = np.sqrt(H*H + W*W)/2
                         rich.print("[bold green]calibration optimizer[/bold green]. current_window: ", current_window)    
                         self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam")
+                        # self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="SGD")
                         self.calibration_optimizers.num_line_elements = 0 # sample points for line fitting
                     else:
                         self.calibration_optimizers = None
@@ -207,11 +220,11 @@ class BackEndCali(BackEnd):
                     rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calibration_identifier}, iter_per_kf: {iter_per_kf}\n")
                     self.push_to_frontend("keyframe")
 
-                    # if (self.signal_calibration_change):
-                    #     self.add_next_kf(cur_frame_idx, self.viewpoints[cur_frame_idx], depth_map=depth_map) 
-                    #     self.map(self.current_window, calibrate=False, iters=iter_per_kf) # don't calibrate with one view. optimize gaussian
-                    #     self.map(self.current_window, prune=True)
-                    #     self.push_to_frontend("keyframe")                    
+                    # add depth points at last, because these points will not be optimized with one view.
+                    if (self.signal_calibration_change):
+                        self.add_next_kf(cur_frame_idx, self.viewpoints[cur_frame_idx], depth_map=depth_map) 
+                        self.map(self.current_window, calibrate=False, iters=iter_per_kf) # don't calibrate with one view. optimize gaussian
+                        # self.map(self.current_window, prune=True)
 
                 else:
                     raise Exception("Unprocessed data", data)

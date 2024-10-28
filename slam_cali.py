@@ -17,7 +17,7 @@ from utils.config_utils import load_config
 from utils.eval_utils import save_gaussians
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import FakeQueue
-from utils.slam_backend import BackEnd
+from utils_cali.slam_cali_backend import BackEndCali as BackEnd
 from utils_cali.slam_cali_frontend import FrontEndCali as FrontEnd
 from utils_cali.dataset_cali import load_dataset
 from utils_cali.eval_cali_utils import eval_ate, eval_rendering, save_gaussians_class, save_cali
