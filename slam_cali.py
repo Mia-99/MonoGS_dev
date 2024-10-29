@@ -99,6 +99,12 @@ class SLAM:
         # online calibration control
         self.frontend.require_calibration = calib_opts.require_calibration
         self.frontend.set_hyperparams()
+        self.frontend.use_gt_poses = self.config["Dataset"]["use_gt_pose"] if (
+            "use_gt_pose" in self.config["Dataset"]
+        ) else False
+        self.frontend.add_perterbation = self.config["Dataset"]["add_perterbation"] if (
+            "add_perterbation" in self.config["Dataset"]
+        ) else False
 
         self.backend.gaussians = self.gaussians
         self.backend.background = self.background
@@ -111,6 +117,9 @@ class SLAM:
         # online calibration control
         self.backend.require_calibration = calib_opts.require_calibration
         self.backend.allow_lens_distortion = calib_opts.allow_lens_distortion
+        self.backend.use_gt_poses = self.config["Dataset"]["use_gt_pose"] if (
+            "use_gt_pose" in self.config["Dataset"]
+        ) else False
 
         self.backend.set_hyperparams()
 

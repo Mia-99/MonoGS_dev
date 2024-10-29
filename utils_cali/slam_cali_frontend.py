@@ -57,7 +57,8 @@ class FrontEndCali(FrontEnd):
         #     self.simulator = None
         path = config.get("Dataset", {}).get("intrinsic_filename", None)
         self.simulator = Simulator(config["Dataset"]["dataset_path"] + '/' + path) if path is not None else None
-        self.use_gt_pose = True
+        self.use_gt_poses = False
+        self.add_perterbation = False
     
     def tracking_use_gt_poses(self, viewpoint):
         viewpoint.R = viewpoint.R_gt
@@ -146,6 +147,11 @@ class FrontEndCali(FrontEnd):
                     viewpoint.kappa_init = 0.0 # backup
                     # viewpoint.fx = self.simulator.fx[cur_frame_idx]
                     # viewpoint.fy = self.simulator.fy[cur_frame_idx]
+                if self.add_perterbation:
+                    viewpoint.calibration_identifier = 1
+                    focal_per = self.config["Dataset"]["focal_perturbation"] if 'focal_perturbation' in self.config["Dataset"] else 1.01
+                    viewpoint.fx = viewpoint.fx * focal_per
+                    viewpoint.fy = viewpoint.fy * focal_per
 
 
                 # initialize calibration and pose to the previous camera
@@ -153,7 +159,7 @@ class FrontEndCali(FrontEnd):
                     prev = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
                     viewpoint.update_calibration (prev.fx, prev.fy, prev.kappa) # use last frame calibration
 
-                    if self.use_gt_pose:
+                    if self.use_gt_poses:
                         viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt) # use last frame pose
                     else:
                         viewpoint.update_RT(prev.R, prev.T)
@@ -204,7 +210,7 @@ class FrontEndCali(FrontEnd):
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  beta = 0.0, learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False)
                     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 1.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
 
-                if self.use_gt_pose:
+                if self.use_gt_poses:
                     render_pkg = self.tracking_use_gt_poses(viewpoint)
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)

@@ -210,17 +210,22 @@ def save_gaussians_class(save_dir, gaussians):
     with open(save_dir + '/gs/instance.pkl', 'wb') as f:
         pickle.dump(gaussians, f)
 
-def eval_cali(frames, kf_indices):
+def eval_cali(frames, kf_indices=None):
 
     # select the calibration id != 0
     n=0
     AFLE=0
-
-    for kf_id in kf_indices:
-        kf = frames[kf_id]
-        if kf.calibration_identifier != 0:
-            n += 1
-            AFLE += abs(frames[kf_id].fx_init - frames[kf_id].fx) 
+    if kf_indices is None:
+        for id, kf in frames.items():
+            if kf.calibration_identifier != 0:
+                n += 1
+                AFLE += abs(kf.fx_init - kf.fx)
+    else:
+        for kf_id in kf_indices:
+            kf = frames[kf_id]
+            if kf.calibration_identifier != 0:
+                n += 1
+                AFLE += abs(kf.fx_init - kf.fx) 
     return AFLE/n if n != 0 else 0
 
 def save_cali(save_dir, frames, kf_indices, N_frames=None):

@@ -16,13 +16,14 @@ from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 import numpy as np
 import rich
 from utils.slam_backend import BackEnd
+from utils_cali.eval_cali_utils import eval_cali
 
 
 
 class BackEndCali(BackEnd):
     def __init__(self, config):
         super().__init__(config)
-        self.use_gt_poses = True
+        self.use_gt_poses = False
 
     def run(self):
         while True:
@@ -93,6 +94,8 @@ class BackEndCali(BackEnd):
 
                     self.viewpoints[cur_frame_idx] = viewpoint
                     self.current_window = current_window
+                    # cali_id doesn't change OR rgbd mode
+                    # if (not self.signal_calibration_change) or (self.config["Training"]["sensor_type"] == 'depth'):
                     if (not self.signal_calibration_change):
                         self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
                         rich.print(f"[bold blue]BackEnd  AddKF depth_map:[/bold blue] [{cur_frame_idx}]")               
@@ -167,7 +170,9 @@ class BackEndCali(BackEnd):
                         self.keyframe_optimizers.zero_grad()
 
                     
-                    if self.require_calibration and self.initialized and calibration_identifier_cnt >= 1 and current_calibration_identifier != 0:
+                    # if self.require_calibration and self.initialized and calibration_identifier_cnt >= 1 and current_calibration_identifier != 0:
+                    # and window is full
+                    if self.require_calibration and self.initialized and calibration_identifier_cnt >= 1 and current_calibration_identifier != 0 and len(self.current_window) == self.config["Training"]["window_size"]:
                         # self.viewpoint_refinement(self.current_window, iters=50)
                         H = viewpoint.image_height
                         W = viewpoint.image_width
@@ -180,13 +185,17 @@ class BackEndCali(BackEnd):
                         self.calibration_optimizers = None
 
                     iters = int(iter_per_kf/2) if self.calibration_optimizers is not None else iter_per_kf
+                    # TODO: add decay learning rate + SGD
 
                     ### The order of following three matters a lot! ###
                     if self.calibration_optimizers is not None:
                         if (calibration_identifier_cnt == 1): # Don't update 3D structure with one view
+                            rich.print("[bold green]cali_id_cnt == 1[/bold green]")
                             lr1 = self.config["Training"]["be_focal_lr_cnt_s2"] if ("be_focal_lr_cnt_s2" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr1)
                             self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=iter_per_kf*3)
+                            afle = eval_cali(self.viewpoints, None)
+                            rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
                             # self.calibration_optimizers.update_focal_learning_rate(0.0025) #0.01 2024-10-15-06-10-34;   0.001 2024-10-14-20-37-38
                             # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=10)
                             # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=iter_per_kf*1)
@@ -195,15 +204,32 @@ class BackEndCali(BackEnd):
                             # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*5)
                             # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=30)
                         elif (calibration_identifier_cnt == 2):
+                            rich.print("[bold green]cali_id_cnt == 2[/bold green]")
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # more iters for two views
                             self.map(self.current_window, prune=True, iters=5)
-
+                            afle = eval_cali(self.viewpoints, None)
+                            rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
                         else:
+                            rich.print("[bold green]cali_id_cnt != 1 and != 2[/bold green]")
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                            # test 1 + rgbd + add kf at first + adam -> afle = 7
+                            # test 1 + rgbd + add kf at last + adam -> afle = 
+                            # test 1 + rgbd + add kf at last + sgd -> afle = 6.8
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
+                            # test 2 + rgbd + add kf at first -> afle = 10
+                            # test 2 + rgbd + add kf at last -> afle = 13
+                            # self.map(self.current_window, calibrate=False, fix_gaussian=True, iters=iter_per_kf)
+                            # self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
+                            # self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
+                            # test 3 + rgbd + add kf at last + sgd + decay -> afle = 
+                            # self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
+
+
+                            afle = eval_cali(self.viewpoints, None)
+                            rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
                     else:
                         self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
@@ -221,11 +247,14 @@ class BackEndCali(BackEnd):
                     self.push_to_frontend("keyframe")
 
                     # add depth points at last, because these points will not be optimized with one view.
+                    # if (self.signal_calibration_change) and (self.config["Training"]["sensor_type"] != 'depth'):
                     if (self.signal_calibration_change):
                         self.add_next_kf(cur_frame_idx, self.viewpoints[cur_frame_idx], depth_map=depth_map) 
                         self.map(self.current_window, calibrate=False, iters=iter_per_kf) # don't calibrate with one view. optimize gaussian
                         # self.map(self.current_window, prune=True)
-
+                    
+                    afle = eval_cali(self.viewpoints, None)
+                    rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
                 else:
                     raise Exception("Unprocessed data", data)
         
