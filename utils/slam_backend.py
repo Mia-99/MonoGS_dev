@@ -151,7 +151,7 @@ class BackEnd(mp.Process):
         Log("Initialized map")
         return render_pkg
 
-    def map(self, current_window, prune=False, calibrate=False, fix_gaussian = False, iters=1):
+    def map(self, current_window, prune=False, calibrate=False, fix_gaussian = False, iters=1, force_densify_prune = False):
         if len(current_window) == 0:
             return
 
@@ -248,10 +248,9 @@ class BackEnd(mp.Process):
                     kf_idx = current_window[idx]
                     n_touched = n_touched_acm[idx]
                     self.occ_aware_visibility[kf_idx] = (n_touched > 0).long()
-
                 # # compute the visibility of the gaussians
                 # # Only prune on the last iteration and when we have full window
-                if prune and not fix_gaussian:
+                if prune and (not fix_gaussian):
                     if len(current_window) == self.config["Training"]["window_size"]:
                         prune_mode = self.config["Training"]["prune_mode"]
                         prune_coviz = 3
@@ -273,6 +272,7 @@ class BackEnd(mp.Process):
                             )
                         if to_prune is not None and self.monocular:
                             self.gaussians.prune_points(to_prune.cuda())
+                            Log("gaussians.prune_points")
                             for idx in range((len(current_window))):
                                 current_idx = current_window[idx]
                                 self.occ_aware_visibility[current_idx] = (
@@ -292,18 +292,18 @@ class BackEnd(mp.Process):
                     self.gaussians.add_densification_stats(
                         viewspace_point_tensor_acm[idx], visibility_filter_acm[idx]
                     )
-
                 update_gaussian = (
                     self.iteration_count % self.gaussian_update_every
                     == self.gaussian_update_offset
                 )
-                if update_gaussian and (not fix_gaussian):
+                if ( update_gaussian and (not fix_gaussian) ) or force_densify_prune:
                     self.gaussians.densify_and_prune(
                         self.opt_params.densify_grad_threshold,
                         self.gaussian_th,
                         self.gaussian_extent,
                         self.size_threshold,
                     )
+                    Log("gaussians.densify_and_prune")
                     gaussian_split = True
 
                 ## Opacity reset
@@ -324,8 +324,9 @@ class BackEnd(mp.Process):
                     self.calibration_optimizers.zero_grad(set_to_none=True)
 
                 # Pose update
-                self.keyframe_optimizers.step()
-                self.keyframe_optimizers.zero_grad(set_to_none=True)
+                if self.keyframe_optimizers is not None:
+                    self.keyframe_optimizers.step()
+                    self.keyframe_optimizers.zero_grad(set_to_none=True)
                 for cam_idx in range(min(frames_to_optimize, len(current_window))):
                     viewpoint = viewpoint_stack[cam_idx]
                     if viewpoint.uid == 0:
@@ -443,11 +444,13 @@ class BackEnd(mp.Process):
                     self.push_to_frontend("init")
 
                 elif data[0] == "calibration_change":
-                    self.map(self.current_window, prune=True, calibrate=False, iters=10) # to perform excessive pruning
-                    self.map(self.current_window, prune=False, calibrate=False, iters=10) # optimize Gaussian parameters only
-                    self.map(self.current_window, prune=True, calibrate=False, iters=1) # prune
-                    self.push_to_frontend()
                     rich.print("[bold red]Backend : calibration change signal recieved [/bold red]")
+                    self.map(self.current_window, prune=True, iters=10) # to perform excessive pruning
+                    # self.map(self.current_window, prune=False, iters=1, force_densify_prune=True) # force densification and split
+                    self.map(self.current_window, prune=False, iters=10) # optimize Gaussian parameters only
+                    self.map(self.current_window, prune=True, iters=1) # prune
+                    self.push_to_frontend()
+                    rich.print("[bold red]Backend : Gaussians optimized for calibration [/bold red]")
 
                 elif data[0] == "keyframe":
                     cur_frame_idx = data[1]
@@ -487,7 +490,8 @@ class BackEnd(mp.Process):
                     pose_opt_params = []
                     calib_opt_frames_stack = []
                     frames_to_optimize = self.config["Training"]["pose_window"]
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else self.config["Training"]["after_mapping_itr_num"]
+                    iter_per_kf_multithread = self.config["Training"]["after_mapping_itr_num"] if "after_mapping_itr_num" in self.config["Training"].keys() else 10
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else iter_per_kf_multithread
                     if not self.initialized:
                         if (
                             len(self.current_window)
@@ -558,8 +562,9 @@ class BackEnd(mp.Process):
 
                     ### The order of following three matters. prune goes last ###
                     if self.calibration_optimizers is not None:
-                        if (calibration_identifier_cnt < 2): # Don't update 3D structure with one view
-                            self.calibration_optimizers.update_focal_learning_rate(lr = self.config["Training"]["be_focal_lr_cnt_s2"])
+                        if (calibration_identifier_cnt == 1): # Don't update 3D structure with one view
+                            lr1 = self.config["Training"]["be_focal_lr_cnt_s2"] if ("be_focal_lr_cnt_s2" in self.config["Training"].keys()) else 0.002
+                            self.calibration_optimizers.update_focal_learning_rate(lr = lr1)
                             self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=iter_per_kf*3)
                             # self.calibration_optimizers.update_focal_learning_rate(0.0025) #0.01 2024-10-15-06-10-34;   0.001 2024-10-14-20-37-38
                             # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=10)
@@ -568,9 +573,15 @@ class BackEnd(mp.Process):
                             # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*3)
                             # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*5)
                             # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=30)
+                        elif (calibration_identifier_cnt == 2):
+                            lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
+                            self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                            self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # more iters for two views
+                            self.map(self.current_window, prune=True, iters=5)
 
                         else:
-                            self.calibration_optimizers.update_focal_learning_rate(lr = self.config["Training"]["be_focal_lr"])
+                            lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
+                            self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
                     else:
                         self.map(self.current_window, iters=iter_per_kf)
@@ -587,6 +598,13 @@ class BackEnd(mp.Process):
                     
                     rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calibration_identifier}, iter_per_kf: {iter_per_kf}\n")
                     self.push_to_frontend("keyframe")
+
+                    # add depth points at last, because these points will not be optimized with one view.
+                    if (self.signal_calibration_change):
+                        self.add_next_kf(cur_frame_idx, self.viewpoints[cur_frame_idx], depth_map=depth_map) 
+                        self.map(self.current_window, calibrate=False, iters=iter_per_kf) # don't calibrate with one view. optimize gaussian
+                        # self.map(self.current_window, prune=True)
+
 
                 else:
                     raise Exception("Unprocessed data", data)

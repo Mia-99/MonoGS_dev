@@ -96,6 +96,7 @@ class SLAM:
         self.frontend.q_main2vis = q_main2vis
         self.frontend.q_vis2main = q_vis2main
         # online calibration control
+        self.frontend.MODULE_TEST_CALIBRATION = calib_opts.calib_module_test # for test and debugging, using --calib_module_test
         self.frontend.require_calibration = calib_opts.require_calibration
         self.frontend.set_hyperparams()
 
@@ -234,6 +235,9 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Training script parameters")
     parser.add_argument("--config", type=str)
     parser.add_argument("--eval", action="store_true")
+    parser.add_argument("--require_calibration", action="store_true", default=False)
+    parser.add_argument("--allow_lens_distortion", action="store_true", default=False)
+    parser.add_argument("--calib_module_test", action="store_true", default=False)
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -244,6 +248,12 @@ if __name__ == "__main__":
 
     config = load_config(args.config)
     save_dir = None
+
+    calib_opts = OnlineCalibrationSettings()
+    # adjust controlo params
+    calib_opts.require_calibration = args.require_calibration
+    calib_opts.allow_lens_distortion = args.require_calibration and args.allow_lens_distortion # activated only when require_calibration = True
+    calib_opts.calib_module_test = args.calib_module_test
 
     if args.eval:
         Log("Running MonoGS in Evaluation Mode")
@@ -256,6 +266,9 @@ if __name__ == "__main__":
         config["Results"]["eval_rendering"] = True
         Log("\tuse_wandb=True")
         config["Results"]["use_wandb"] = True
+        Log("\trequire_calibration=" + str(calib_opts.require_calibration))
+        Log("\tallow_lens_distortion=" + str(calib_opts.allow_lens_distortion))
+        Log("\tcalib_module_test=" + str(calib_opts.calib_module_test))
 
     if config["Results"]["save_results"]:
         mkdir_p(config["Results"]["save_dir"])
@@ -267,6 +280,9 @@ if __name__ == "__main__":
         tmp = args.config
         tmp = tmp.split(".")[0]
         config["Results"]["save_dir"] = save_dir
+        config["calib_opts_require_calibration"] = calib_opts.require_calibration
+        config["calib_opts_allow_lens_distortion"] = calib_opts.allow_lens_distortion
+        config["calib_module_test"] = calib_opts.calib_module_test
         mkdir_p(save_dir)
         with open(os.path.join(save_dir, "config.yml"), "w") as file:
             documents = yaml.dump(config, file)
@@ -281,10 +297,7 @@ if __name__ == "__main__":
         wandb.define_metric("ate*", step_metric="frame_idx")
 
 
-    calib_opts = OnlineCalibrationSettings()
-    # adjust controlo params
-    calib_opts.require_calibration = True
-    calib_opts.allow_lens_distortion = True  # activated only when require_calibration = True
+
 
 
     slam = SLAM(config, save_dir=save_dir, calib_opts=calib_opts)
@@ -298,4 +311,4 @@ if __name__ == "__main__":
     viewpoint_stack = slam.backend.viewpoints,
     gaussians = slam.backend.gaussians
 
-    Fig = Viewer(viewpoint_stack=viewpoint_stack,  gaussians_gl= create_gaussians_gl(gaussians))
+    # Fig = Viewer(viewpoint_stack=viewpoint_stack,  gaussians_gl= create_gaussians_gl(gaussians))
