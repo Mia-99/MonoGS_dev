@@ -122,6 +122,8 @@ class SFM(mp.Process):
         self.MODULE_TEST_CALIBRATION = False
         self.add_calib_noise_iter = -1
 
+        self.gaussian_iter = 0
+
 
     def push_to_gui (self, cam_cnt):
         # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
@@ -177,7 +179,6 @@ class SFM(mp.Process):
 
         # Gaussian scale space for focal length calibration
         if use_scale_space and self.gaussian_scale_t > 0.5:
-            mask = mask * self.image_margin_mask
             image_scale_t = image_conv_gaussian_separable(image, sigma=self.gaussian_scale_t, epsilon=0.01) * mask
             gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=self.gaussian_scale_t, epsilon=0.01) * mask
         else:
@@ -194,11 +195,6 @@ class SFM(mp.Process):
         # enable SSIM loss when a good intialial reconstruction is attained
         if use_SSIM:
             loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
-
-        self.viewspace_point_tensor_acm.append(viewspace_point_tensor)
-        self.visibility_filter_acm.append(visibility_filter)
-        self.radii_acm.append(radii)
-        self.n_touched_acm.append(n_touched)
 
         return loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched
     
@@ -249,25 +245,22 @@ class SFM(mp.Process):
 
     def optimize_one_step_sequel (self, iteration, use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
 
-        self.gaussians.update_learning_rate(iteration)
+        self.gaussian_iter += 1
+        self.gaussians.update_learning_rate(self.gaussian_iter)
 
         for viewpoint in self.viewpoint_stack:
 
             # FORWARD
-            loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )
-
-            self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
+            loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )            
 
             # BACKWARD
             loss.backward()
 
             with torch.no_grad():
 
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+                self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
-                # Gaussian Dynamic Control. Densification and Prune
-                self.set_gaussian_densification_stats()
                 if densify_prune:
                     sfm_gui.Log("Densify and Prune Gaussians", tag="SFM")
                     size_threshold = 20 if iteration > self.opt.opacity_reset_interval else None
@@ -278,19 +271,21 @@ class SFM(mp.Process):
                     self.gaussians.reset_opacity()
 
                 self.gaussians.optimizer.step()
+                self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
+
+                self.calibration_optimizer.zero_grad() # clear gradient every iteration
+                self.pose_optimizer.zero_grad() # clear gradient every iteration
+
 
 
 
     def optimize_one_step (self, iteration, update_Gaussian = False, update_pose = False, update_calibration = False,  use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
 
-        self.gaussians.update_learning_rate(iteration)
+        self.gaussian_iter += 1
+        self.gaussians.update_learning_rate(self.gaussian_iter)
 
         # FORWARD
         loss = self.compute_loss ( use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )
-
-        self.calibration_optimizer.zero_grad() # clear gradient every iteration
-        self.pose_optimizer.zero_grad() # clear gradient every iteration
-        self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
 
         # BACKWARD
         loss.backward()
@@ -322,60 +317,96 @@ class SFM(mp.Process):
             if update_Gaussian:
                 self.gaussians.optimizer.step()
 
+            self.calibration_optimizer.zero_grad() # clear gradient every iteration
+            self.pose_optimizer.zero_grad() # clear gradient every iteration
+            self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
+
 
 
     def run_phase1 (self, max_iters = 500):
         '''
         Initialize 3D Gaussians for sparse SfM point-cloud
         '''
-        for iteration in range(0, max_iters):
+        progress_bar = tqdm(range(1, max_iters+1), desc="Phase1: Training progress")
+        cam_cnt = 0
+        for iteration in range(1, max_iters+1):
             self.read_gui_ctrl()
-            densify_prune = False,
-            reset_opacity = False
+            densify_prune = (iteration % 50 ==0)
+            reset_opacity = (iteration % 100 ==0)
             self.optimize_one_step_sequel (iteration,
                                            use_scale_space = False,
                                            use_ssim_loss = False,
                                            densify_prune = densify_prune,
                                            reset_opacity = reset_opacity
                                            )
+            if iteration % 5 == 0:
+                self.push_to_gui(cam_cnt)
+                cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+            if iteration % 10 == 0:
+                with torch.no_grad():
+                    loss_log = self.compute_loss (use_scale_space = False,  use_SSIM = False )
+                progress_bar.set_postfix({"Loss": f"{loss_log:.{7}f}"})
+                progress_bar.update(10)
+        progress_bar.close()
 
 
     def run_phase2 (self, max_iters = 500):
         '''
         BA (Gaussian, pose, calibration)
         '''
-        for iteration in range(0, max_iters):
+        progress_bar = tqdm(range(1, max_iters+1), desc="Phase2: Training progress")
+        cam_cnt = 0
+        for iteration in range(1, max_iters+1):
             self.read_gui_ctrl()
-            densify_prune = False,
-            reset_opacity = False
+            densify_prune = (iteration % 100 ==0)
+            reset_opacity = (iteration % 200 ==0)
             self.optimize_one_step (iteration,
                                     update_Gaussian = True,
-                                    update_pose = True,
-                                    update_calibration = True,
+                                    update_pose = False,
+                                    update_calibration = False,
                                     use_scale_space = False,
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
-
+            if iteration % 5 == 0:
+                self.push_to_gui(cam_cnt)
+                cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+            if iteration % 10 == 0:
+                with torch.no_grad():
+                    loss_log = self.compute_loss (use_scale_space = False,  use_SSIM = False )
+                progress_bar.set_postfix({"Loss": f"{loss_log:.{7}f}"})
+                progress_bar.update(10)
+        progress_bar.close()
 
     def run_phase3 (self, max_iters = 500):
         '''
         Refine 3D Gaussians with SSIM loss
         '''
-        for iteration in range(0, max_iters):
+        progress_bar = tqdm(range(1, max_iters+1), desc="Phase3: Training progress")
+        cam_cnt = 0
+        for iteration in range(1, max_iters+1):
             self.read_gui_ctrl()
-            densify_prune = False,
-            reset_opacity = False
+            densify_prune = (iteration % 50 ==0)
+            reset_opacity = (iteration % 100 ==0)
             self.optimize_one_step (iteration,
                                     update_Gaussian = True,
                                     use_ssim_loss = True,
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
+            if iteration % 5 == 0:
+                self.push_to_gui(cam_cnt)
+                cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+
+            if iteration % 10 == 0:
+                with torch.no_grad():
+                    loss_log = self.compute_loss (use_scale_space = False,  use_SSIM = False )
+                progress_bar.set_postfix({"Loss": f"{loss_log:.{7}f}"})
+                progress_bar.update(10)
+        progress_bar.close()
 
 
-
-    def run (self):
+    def optimize (self):
 
         _, h, w = self.viewpoint_stack[0].original_image.shape
         self.image_margin_mask = torch.zeros(h, w).cuda()
@@ -384,47 +415,31 @@ class SFM(mp.Process):
         if self.focal_reference is None:
             self.focal_reference = np.sqrt(h*h + w*w)/2
 
-
         if self.calibration_optimizer is None:            
             self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-            self.calibration_optimizer.update_focal_learning_rate (lr = 0.1)
+            self.calibration_optimizer.update_focal_learning_rate (lr = 0.01)
             self.calib_safe_guard = False
-
 
         if self.pose_optimizer is None:
             self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
-
 
         cam_cnt = 0
         if self.use_gui:
             self.push_to_gui(cam_cnt)
             time.sleep(1.5)
 
-
         sfm_gui.Log("start SfM optimization")
-
-        first_iter = 0
 
         self.gaussians.training_setup(self.opt)
 
-   
-        iter_start = torch.cuda.Event(enable_timing = True)
-        iter_end = torch.cuda.Event(enable_timing = True)
-
-
-        ema_loss_for_log = 0.0
-        progress_bar = tqdm(range(first_iter, self.opt.iterations), desc="Training progress")
-        first_iter += 1
-
-
-        self.run_phase1()
-        self.run_phase2()
-        self.run_phase3()
+        self.run_phase1(max_iters = 500)
+        self.run_phase2(max_iters = 500)
+        self.run_phase3(max_iters = 500)
 
 
 
 
-    def optimize (self, update_Gaussian = False, update_pose = False, update_calibration = False,  use_ssim_loss = False):
+    def optimize_backup (self, update_Gaussian = False, update_pose = False, update_calibration = False,  use_ssim_loss = False):
 
 
         _, h, w = self.viewpoint_stack[0].original_image.shape

@@ -156,7 +156,7 @@ if __name__ == "__main__":
     '''
 
 
-    use_pcd_from_depth_prediction = True
+    use_pcd_from_depth_prediction = False
 
 
     # perform colmap reconstruction
