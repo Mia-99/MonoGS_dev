@@ -205,29 +205,29 @@ if __name__ == "__main__":
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
 
     # From dense depth prediction of a neural network
-    if use_pcd_from_depth_prediction:
-        positions, colors = init_dense_pcd_from_network(viewpoint_stack, reconstruction, num_points = 50000)
-        sfm.add_dense_point_cloud(positions=positions, colors=colors)
+    # if use_pcd_from_depth_prediction:
+    #     positions, colors = init_dense_pcd_from_network(viewpoint_stack, reconstruction, num_points = 50000)
+    #     sfm.add_dense_point_cloud(positions=positions, colors=colors)
 
 
     sfm.MODULE_TEST_CALIBRATION = False
 
     
 
-    sfm.start_calib_iter = 250
-    sfm.stop_calib_iter = 500
+    # sfm.start_calib_iter = 250
+    # sfm.stop_calib_iter = 500
 
-    sfm.start_pose_iter = 200
-    sfm.stop_pose_iter = 500
+    # sfm.start_pose_iter = 200
+    # sfm.stop_pose_iter = 500
 
-    sfm.start_gaussian_iter = 0
-    sfm.stop_gaussian_iter = 100000
+    # sfm.start_gaussian_iter = 0
+    # sfm.stop_gaussian_iter = 100000
 
-    sfm.add_dense_pcd_iter = 500
+    # sfm.add_dense_pcd_iter = 500
 
 
-    sfm.require_calibration = True
-    sfm.allow_lens_distortion = True
+    # sfm.require_calibration = True
+    # sfm.allow_lens_distortion = True
     
 
     sfm_process = mp.Process(target=sfm.optimize)
@@ -244,8 +244,8 @@ if __name__ == "__main__":
 
     sfm_process.join()
     sfm_gui.Log("Finished", tag="SfM")
+    
 
-
-    Fig = Viewer(viewpoint_stack=viewpoint_stack,  gaussians_gl= create_gaussians_gl(gaussians))
+    # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
 
 

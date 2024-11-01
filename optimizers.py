@@ -294,14 +294,14 @@ class PoseOptimizer:
             pose_opt_params.append(
                 {
                     "params": [viewpoint_cam.cam_rot_delta],
-                    "lr": 0.003*0.5,
+                    "lr": 0.003,
                     "name": "rot_{}".format(viewpoint_cam.uid),
                 }
             )
             pose_opt_params.append(
                 {
                     "params": [viewpoint_cam.cam_trans_delta],
-                    "lr": 0.001*0.5,
+                    "lr": 0.001,
                     "name": "trans_{}".format(viewpoint_cam.uid),
                 }
             )
