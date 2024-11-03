@@ -140,7 +140,7 @@ if __name__ == "__main__":
     '''
 
     data_url = "https://cvg-data.inf.ethz.ch/local-feature-evaluation-schoenberger2017/Strecha-Herzjesu.zip"
-    image_dir = "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images"
+    image_dir = "/datasets/Strecha-Herzjesu/Herzjesu/images"
     '''
     ground_truth calibration:
         2759.48 0 1520.69
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     '''
     
     data_url = "https://cvg-data.inf.ethz.ch/local-feature-evaluation-schoenberger2017/Strecha-Fountain.zip"
-    image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+    image_dir = "/datasets/Strecha-Fountain/Fountain/images"
     '''
     ground_truth calibration:
         2759.48 0 1520.69
@@ -205,7 +205,7 @@ if __name__ == "__main__":
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
 
     # From dense depth prediction of a neural network
-    if use_pcd_from_depth_prediction:
+    if use_pcd_from_depth_predictionDepthAnything:
         positions, colors = init_dense_pcd_from_network(viewpoint_stack, reconstruction, num_points = 50000)
         sfm.add_dense_point_cloud(positions=positions, colors=colors)
 
