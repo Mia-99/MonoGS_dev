@@ -58,6 +58,8 @@ from matplotlib import pyplot as plt
 import pathlib
 import rich
 
+from gaussian_viewer import Viewer, create_gaussians_gl
+
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -122,17 +124,19 @@ class SFM(mp.Process):
         self.MODULE_TEST_CALIBRATION = False
         self.add_calib_noise_iter = -1
 
+        self.gaussian_iter = 0
+
 
     def push_to_gui (self, cam_cnt):
-        # depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
+        depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
 
         # use depth prediction from a Neural network                    
-        cv_img = (self.viewpoint_stack[cam_cnt].original_image*255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
-        depth = self.depth_anything.eval(cv_img)
+        # cv_img = (self.viewpoint_stack[cam_cnt].original_image*255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        # depth = self.depth_anything.eval(cv_img)
 
         self.q_main2vis.put(
             gui_utils.GaussianPacket(
-                gaussians=self.gaussians,
+                gaussians=clone_obj(self.gaussians),
                 keyframes=copy.deepcopy(self.viewpoint_stack),
                 current_frame=clone_obj(self.viewpoint_stack[cam_cnt]),
                 gtcolor=self.viewpoint_stack[cam_cnt].original_image,
@@ -157,6 +161,21 @@ class SFM(mp.Process):
 
 
 
+    def show_rendered_images (self):
+        for viewpoint in self.viewpoint_stack:
+            render_pkg = render(viewpoint, self.gaussians, self.pipe, self.background,
+                                scaling_modifier=1.0,
+                                override_color=None,
+                                mask=None,)
+            image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]
+            # convert torch tensor to opencv image
+            rgb = torch.clamp(image, min=0, max=1.0) * 255
+            rgb = rgb.byte().permute(1, 2, 0).contiguous().cpu().numpy()
+            plt.imshow(rgb)
+            plt.title(f"view uid: {viewpoint.uid}", fontweight ="bold") 
+            plt.show()
+
+
 
     def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_SSIM = False):
         # Loss function
@@ -177,7 +196,6 @@ class SFM(mp.Process):
 
         # Gaussian scale space for focal length calibration
         if use_scale_space and self.gaussian_scale_t > 0.5:
-            mask = mask * self.image_margin_mask
             image_scale_t = image_conv_gaussian_separable(image, sigma=self.gaussian_scale_t, epsilon=0.01) * mask
             gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=self.gaussian_scale_t, epsilon=0.01) * mask
         else:
@@ -194,11 +212,6 @@ class SFM(mp.Process):
         # enable SSIM loss when a good intialial reconstruction is attained
         if use_SSIM:
             loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
-
-        self.viewspace_point_tensor_acm.append(viewspace_point_tensor)
-        self.visibility_filter_acm.append(visibility_filter)
-        self.radii_acm.append(radii)
-        self.n_touched_acm.append(n_touched)
 
         return loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched
     
@@ -249,25 +262,22 @@ class SFM(mp.Process):
 
     def optimize_one_step_sequel (self, iteration, use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
 
-        self.gaussians.update_learning_rate(iteration)
+        self.gaussian_iter += 1
+        self.gaussians.update_learning_rate(self.gaussian_iter)
 
         for viewpoint in self.viewpoint_stack:
 
             # FORWARD
-            loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )
-
-            self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
+            loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )            
 
             # BACKWARD
             loss.backward()
 
             with torch.no_grad():
 
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+                self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
-                # Gaussian Dynamic Control. Densification and Prune
-                self.set_gaussian_densification_stats()
                 if densify_prune:
                     sfm_gui.Log("Densify and Prune Gaussians", tag="SFM")
                     size_threshold = 20 if iteration > self.opt.opacity_reset_interval else None
@@ -278,19 +288,21 @@ class SFM(mp.Process):
                     self.gaussians.reset_opacity()
 
                 self.gaussians.optimizer.step()
+                self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
+
+                self.calibration_optimizer.zero_grad() # clear gradient every iteration
+                self.pose_optimizer.zero_grad() # clear gradient every iteration
+
 
 
 
     def optimize_one_step (self, iteration, update_Gaussian = False, update_pose = False, update_calibration = False,  use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
 
-        self.gaussians.update_learning_rate(iteration)
+        self.gaussian_iter += 1
+        self.gaussians.update_learning_rate(self.gaussian_iter)
 
         # FORWARD
         loss = self.compute_loss ( use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )
-
-        self.calibration_optimizer.zero_grad() # clear gradient every iteration
-        self.pose_optimizer.zero_grad() # clear gradient every iteration
-        self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
 
         # BACKWARD
         loss.backward()
@@ -322,110 +334,96 @@ class SFM(mp.Process):
             if update_Gaussian:
                 self.gaussians.optimizer.step()
 
+            self.calibration_optimizer.zero_grad() # clear gradient every iteration
+            self.pose_optimizer.zero_grad() # clear gradient every iteration
+            self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
+
 
 
     def run_phase1 (self, max_iters = 500):
         '''
         Initialize 3D Gaussians for sparse SfM point-cloud
         '''
+        progress_bar = tqdm(range(1, max_iters+1), desc="Phase1: Training progress")
+        cam_cnt = 0
         for iteration in range(0, max_iters):
             self.read_gui_ctrl()
-            densify_prune = False,
-            reset_opacity = False
+            densify_prune = iteration and (iteration % 20 ==0)
+            reset_opacity = iteration and (iteration % 300 ==0)
             self.optimize_one_step_sequel (iteration,
                                            use_scale_space = False,
                                            use_ssim_loss = False,
                                            densify_prune = densify_prune,
                                            reset_opacity = reset_opacity
                                            )
+            if iteration % 5 == 0:
+                self.push_to_gui(cam_cnt)
+                cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+            if iteration % 10 == 0:
+                with torch.no_grad():
+                    loss_log = self.compute_loss (use_scale_space = False,  use_SSIM = False )
+                progress_bar.set_postfix({"Loss": f"{loss_log:.{7}f}"})
+                progress_bar.update(10)
+        progress_bar.close()
 
 
-    def run_phase2 (self, max_iters = 500):
+    def run_phase2 (self, max_iters = 500, update_Gaussian = True, update_pose = False, update_calibration = False):
         '''
         BA (Gaussian, pose, calibration)
         '''
+        progress_bar = tqdm(range(1, max_iters+1), desc="Phase2: Training progress")
+        cam_cnt = 0
         for iteration in range(0, max_iters):
             self.read_gui_ctrl()
-            densify_prune = False,
-            reset_opacity = False
+            densify_prune = iteration and (iteration % 50 ==0)
+            reset_opacity = iteration and (iteration % 300 ==0)
             self.optimize_one_step (iteration,
-                                    update_Gaussian = True,
-                                    update_pose = True,
-                                    update_calibration = True,
+                                    update_Gaussian = update_Gaussian,
+                                    update_pose = update_pose,
+                                    update_calibration = update_calibration,
                                     use_scale_space = False,
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
+            if iteration % 5 == 0:
+                self.push_to_gui(cam_cnt)
+                cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+            if iteration % 10 == 0:
+                with torch.no_grad():
+                    loss_log = self.compute_loss (use_scale_space = False,  use_SSIM = False )
+                progress_bar.set_postfix({"Loss": f"{loss_log:.{7}f}"})
+                progress_bar.update(10)
+        progress_bar.close()
 
 
     def run_phase3 (self, max_iters = 500):
         '''
         Refine 3D Gaussians with SSIM loss
         '''
+        progress_bar = tqdm(range(1, max_iters+1), desc="Phase3: Training progress")
+        cam_cnt = 0
         for iteration in range(0, max_iters):
             self.read_gui_ctrl()
-            densify_prune = False,
-            reset_opacity = False
+            densify_prune = iteration and (iteration % 40 ==0)
+            reset_opacity = iteration and (iteration % 300 ==0)
             self.optimize_one_step (iteration,
                                     update_Gaussian = True,
                                     use_ssim_loss = True,
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
+            if iteration % 5 == 0:
+                self.push_to_gui(cam_cnt)
+                cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+            if iteration % 10 == 0:
+                with torch.no_grad():
+                    loss_log = self.compute_loss (use_scale_space = False,  use_SSIM = False )
+                progress_bar.set_postfix({"Loss": f"{loss_log:.{7}f}"})
+                progress_bar.update(10)
+        progress_bar.close()
 
 
-
-    def run (self):
-
-        _, h, w = self.viewpoint_stack[0].original_image.shape
-        self.image_margin_mask = torch.zeros(h, w).cuda()
-        band_with = int(1.0 * self.gaussian_scale_t)
-        self.image_margin_mask[band_with:-band_with,  band_with:-band_with] = 1.0
-        if self.focal_reference is None:
-            self.focal_reference = np.sqrt(h*h + w*w)/2
-
-
-        if self.calibration_optimizer is None:            
-            self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-            self.calibration_optimizer.update_focal_learning_rate (lr = 0.1)
-            self.calib_safe_guard = False
-
-
-        if self.pose_optimizer is None:
-            self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
-
-
-        cam_cnt = 0
-        if self.use_gui:
-            self.push_to_gui(cam_cnt)
-            time.sleep(1.5)
-
-
-        sfm_gui.Log("start SfM optimization")
-
-        first_iter = 0
-
-        self.gaussians.training_setup(self.opt)
-
-   
-        iter_start = torch.cuda.Event(enable_timing = True)
-        iter_end = torch.cuda.Event(enable_timing = True)
-
-
-        ema_loss_for_log = 0.0
-        progress_bar = tqdm(range(first_iter, self.opt.iterations), desc="Training progress")
-        first_iter += 1
-
-
-        self.run_phase1()
-        self.run_phase2()
-        self.run_phase3()
-
-
-
-
-    def optimize (self, update_Gaussian = False, update_pose = False, update_calibration = False,  use_ssim_loss = False):
-
+    def optimize (self):
 
         _, h, w = self.viewpoint_stack[0].original_image.shape
         self.image_margin_mask = torch.zeros(h, w).cuda()
@@ -434,198 +432,251 @@ class SFM(mp.Process):
         if self.focal_reference is None:
             self.focal_reference = np.sqrt(h*h + w*w)/2
 
-
         if self.calibration_optimizer is None:            
             self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-            self.calibration_optimizer.update_focal_learning_rate (lr = 0.1)
+            self.calibration_optimizer.update_focal_learning_rate (lr = 0.01) # 0.1 also works
             self.calib_safe_guard = False
-
 
         if self.pose_optimizer is None:
             self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
-
-
 
         cam_cnt = 0
         if self.use_gui:
             self.push_to_gui(cam_cnt)
             time.sleep(1.5)
 
+        self.gaussians.training_setup(self.opt)
 
         sfm_gui.Log("start SfM optimization")
 
-        first_iter = 0
+        # Gaussian initialization
+        self.run_phase1(max_iters = 200)
 
-        self.gaussians.training_setup(self.opt)
+        # Bundle adjustment
+        self.run_phase2(max_iters = 100, update_Gaussian = True, update_pose = False, update_calibration = False)
+        self.run_phase2(max_iters = 500, update_Gaussian = True, update_pose = True, update_calibration = True)
+
+        # # refinement using SSIM 
+        self.run_phase3(max_iters = 500)
+
+        sfm_gui.Log(f"SfM optimization complete.")
+
+        self.show_rendered_images()
+
+        if self.use_gui:
+            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
+            time.sleep(3.0)
+
+        # Fig = Viewer(viewpoint_stack=self.viewpoint_stack,
+        #              gaussians_gl= create_gaussians_gl(clone_obj(self.gaussians)) 
+        #             )
+
+        
+
+
+
+    # def optimize_backup (self, update_Gaussian = False, update_pose = False, update_calibration = False,  use_ssim_loss = False):
+
+
+    #     _, h, w = self.viewpoint_stack[0].original_image.shape
+    #     self.image_margin_mask = torch.zeros(h, w).cuda()
+    #     band_with = int(1.0 * self.gaussian_scale_t)
+    #     self.image_margin_mask[band_with:-band_with,  band_with:-band_with] = 1.0
+    #     if self.focal_reference is None:
+    #         self.focal_reference = np.sqrt(h*h + w*w)/2
+
+
+    #     if self.calibration_optimizer is None:            
+    #         self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+    #         self.calibration_optimizer.update_focal_learning_rate (lr = 0.1)
+    #         self.calib_safe_guard = False
+
+
+    #     if self.pose_optimizer is None:
+    #         self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
+
+
+
+    #     cam_cnt = 0
+    #     if self.use_gui:
+    #         self.push_to_gui(cam_cnt)
+    #         time.sleep(1.5)
+
+
+    #     sfm_gui.Log("start SfM optimization")
+
+    #     first_iter = 0
+
+    #     self.gaussians.training_setup(self.opt)
 
    
-        iter_start = torch.cuda.Event(enable_timing = True)
-        iter_end = torch.cuda.Event(enable_timing = True)
+    #     iter_start = torch.cuda.Event(enable_timing = True)
+    #     iter_end = torch.cuda.Event(enable_timing = True)
 
 
-        ema_loss_for_log = 0.0
-        progress_bar = tqdm(range(first_iter, self.opt.iterations), desc="Training progress")
-        first_iter += 1
+    #     ema_loss_for_log = 0.0
+    #     progress_bar = tqdm(range(first_iter, self.opt.iterations), desc="Training progress")
+    #     first_iter += 1
 
 
-        loss_prev = 1e10
-        undo_prev = False
+    #     loss_prev = 1e10
+    #     undo_prev = False
 
 
-        for iteration in range(first_iter, self.opt.iterations+1):
+    #     for iteration in range(first_iter, self.opt.iterations+1):
             
 
-            if (self.dense_point_cloud is not None) and (iteration == self.add_dense_pcd_iter):
-                self.gaussians.extend_from_pcd(self.dense_point_cloud, point_size=1.0)
-                self.gaussians.training_setup(self.opt)
-                sfm_gui.Log(f"Include additional dense point cloud: {len(self.dense_point_cloud.points)} points", tag="SFM")
+    #         if (self.dense_point_cloud is not None) and (iteration == self.add_dense_pcd_iter):
+    #             self.gaussians.extend_from_pcd(self.dense_point_cloud, point_size=1.0)
+    #             self.gaussians.training_setup(self.opt)
+    #             sfm_gui.Log(f"Include additional dense point cloud: {len(self.dense_point_cloud.points)} points", tag="SFM")
 
 
-            self.read_gui_ctrl()
+    #         self.read_gui_ctrl()
 
 
-            iter_start.record()
+    #         iter_start.record()
 
 
-            # add noise to calibration to test the robustness
-            if self.MODULE_TEST_CALIBRATION and iteration == self.add_calib_noise_iter:
-                for viewpoint_cam in self.viewpoint_stack:
-                    focal = 400 # gt = 580. tunning in range [400 - 700]
-                    viewpoint_cam.fx = focal
-                    viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
-                    viewpoint_cam.kappa = 0.0
+    #         # add noise to calibration to test the robustness
+    #         if self.MODULE_TEST_CALIBRATION and iteration == self.add_calib_noise_iter:
+    #             for viewpoint_cam in self.viewpoint_stack:
+    #                 focal = 400 # gt = 580. tunning in range [400 - 700]
+    #                 viewpoint_cam.fx = focal
+    #                 viewpoint_cam.fy = viewpoint_cam.aspect_ratio * focal
+    #                 viewpoint_cam.kappa = 0.0
 
-                self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-                self.calibration_optimizer.update_focal_learning_rate (lr = 0.1)
-                self.calib_safe_guard = False
+    #             self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+    #             self.calibration_optimizer.update_focal_learning_rate (lr = 0.1)
+    #             self.calib_safe_guard = False
 
-                if self.use_gui:
-                    cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
-                    self.push_to_gui(cam_cnt)
-                time.sleep(3)
-
-
-            frozen_states = ( iteration >= self.start_calib_iter and iteration < self.start_calib_iter + 50 )
+    #             if self.use_gui:
+    #                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+    #                 self.push_to_gui(cam_cnt)
+    #             time.sleep(3)
 
 
-            if iteration == self.start_calib_iter + 50: # change to SGD
-                lr = self.calibration_optimizer.estimate_step_size()
-                self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "SGD")
-                self.calibration_optimizer.update_focal_learning_rate (lr = lr)
-                self.calib_safe_guard = True
+    #         frozen_states = ( iteration >= self.start_calib_iter and iteration < self.start_calib_iter + 50 )
+
+
+    #         if iteration == self.start_calib_iter + 50: # change to SGD
+    #             lr = self.calibration_optimizer.estimate_step_size()
+    #             self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "SGD")
+    #             self.calibration_optimizer.update_focal_learning_rate (lr = lr)
+    #             self.calib_safe_guard = True
             
 
-            self.gaussians.update_learning_rate(iteration)
+    #         self.gaussians.update_learning_rate(iteration)
 
-            # Every 1000 its we increase the levels of SH up to a maximum degree
-            if iteration % 1000 == 0:
-                self.gaussians.oneupSHdegree()
+    #         # Every 1000 its we increase the levels of SH up to a maximum degree
+    #         if iteration % 1000 == 0:
+    #             self.gaussians.oneupSHdegree()
 
-            # FORWARD
-            loss = self.compute_loss (
-                    use_scale_space = frozen_states,
-                    use_SSIM = (iteration > self.stop_calib_iter) )
-
-
-            iter_end.record()
-
-            # calibration step safe-guard
-            if self.require_calibration and iteration >= self.start_calib_iter and iteration < self.stop_calib_iter:
-                if self.calib_safe_guard and loss > loss_prev:
-                    rich.print(f"[bold yellow][Warning]: learning rate is too big! revoke previous step [/bold yellow]")
-                    # print(f"loss_prev = {loss_prev},   loss = {loss},   current_focal = {self.viewpoint_stack[0].fx}")
-                    self.calibration_optimizer.undo_focal_step()
-                    # print(f"\t after revoking, current_fx = {self.viewpoint_stack[0].fx}")
-
-                    if (not undo_prev):
-                        undo_prev = True
-                        # recompute the loss, as Gaussian/pose update may have changed it
-                        loss_prev = self.compute_loss (
-                                use_scale_space = frozen_states,
-                                use_SSIM = (iteration > self.opt.densify_until_iter) )
-                    # verify the loss again
-                    if loss > loss_prev:
-                        self.calibration_optimizer.update_focal_learning_rate (scale = 0.5)
-
-                    with torch.no_grad():
-                        self.calibration_optimizer.focal_step() # focal step with old gradient
-                    # print(f"\t update to     , current_fx = {self.viewpoint_stack[0].fx}\n")
-                    continue
+    #         # FORWARD
+    #         loss = self.compute_loss (
+    #                 use_scale_space = frozen_states,
+    #                 use_SSIM = (iteration > self.stop_calib_iter) )
 
 
-            undo_prev = False
-            if loss < loss_prev:
-                loss_prev = loss
+    #         iter_end.record()
+
+    #         # calibration step safe-guard
+    #         if self.require_calibration and iteration >= self.start_calib_iter and iteration < self.stop_calib_iter:
+    #             if self.calib_safe_guard and loss > loss_prev:
+    #                 rich.print(f"[bold yellow][Warning]: learning rate is too big! revoke previous step [/bold yellow]")
+    #                 # print(f"loss_prev = {loss_prev},   loss = {loss},   current_focal = {self.viewpoint_stack[0].fx}")
+    #                 self.calibration_optimizer.undo_focal_step()
+    #                 # print(f"\t after revoking, current_fx = {self.viewpoint_stack[0].fx}")
+
+    #                 if (not undo_prev):
+    #                     undo_prev = True
+    #                     # recompute the loss, as Gaussian/pose update may have changed it
+    #                     loss_prev = self.compute_loss (
+    #                             use_scale_space = frozen_states,
+    #                             use_SSIM = (iteration > self.opt.densify_until_iter) )
+    #                 # verify the loss again
+    #                 if loss > loss_prev:
+    #                     self.calibration_optimizer.update_focal_learning_rate (scale = 0.5)
+
+    #                 with torch.no_grad():
+    #                     self.calibration_optimizer.focal_step() # focal step with old gradient
+    #                 # print(f"\t update to     , current_fx = {self.viewpoint_stack[0].fx}\n")
+    #                 continue
 
 
-            self.calibration_optimizer.zero_grad() # clear gradient every iteration
-            self.pose_optimizer.zero_grad() # clear gradient every iteration
-            self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
-
-            loss.backward()
+    #         undo_prev = False
+    #         if loss < loss_prev:
+    #             loss_prev = loss
 
 
-            with torch.no_grad():
-                # Progress bar
-                ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-                if iteration % 10 == 0:
-                    progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
-                    progress_bar.update(10)
-                if iteration == self.opt.iterations:
-                    progress_bar.close()
+    #         self.calibration_optimizer.zero_grad() # clear gradient every iteration
+    #         self.pose_optimizer.zero_grad() # clear gradient every iteration
+    #         self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
 
-                # Densification
-                if True and iteration < self.opt.densify_until_iter:
+    #         loss.backward()
 
-                    self.set_gaussian_densification_stats()
 
-                    if iteration > self.opt.densify_from_iter and iteration % self.opt.densification_interval == 0:
-                        sfm_gui.Log("Densify and Prune Gaussians", tag="SFM")
-                        size_threshold = 20 if iteration > self.opt.opacity_reset_interval else None
-                        self.gaussians.densify_and_prune(self.opt.densify_grad_threshold, 0.005, self.cameras_extent, size_threshold)
+    #         with torch.no_grad():
+    #             # Progress bar
+    #             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
+    #             if iteration % 10 == 0:
+    #                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+    #                 progress_bar.update(10)
+    #             if iteration == self.opt.iterations:
+    #                 progress_bar.close()
+
+    #             # Densification
+    #             if True and iteration < self.opt.densify_until_iter:
+
+    #                 self.set_gaussian_densification_stats()
+
+    #                 if iteration > self.opt.densify_from_iter and iteration % self.opt.densification_interval == 0:
+    #                     sfm_gui.Log("Densify and Prune Gaussians", tag="SFM")
+    #                     size_threshold = 20 if iteration > self.opt.opacity_reset_interval else None
+    #                     self.gaussians.densify_and_prune(self.opt.densify_grad_threshold, 0.005, self.cameras_extent, size_threshold)
                     
-                    if iteration % self.opt.opacity_reset_interval == 0:
-                        sfm_gui.Log("Reset opacity of all Gaussians", tag="SFM")
-                        self.gaussians.reset_opacity()
+    #                 if iteration % self.opt.opacity_reset_interval == 0:
+    #                     sfm_gui.Log("Reset opacity of all Gaussians", tag="SFM")
+    #                     self.gaussians.reset_opacity()
 
 
-                # calibration step
-                if self.require_calibration and iteration >= self.start_calib_iter and iteration < self.stop_calib_iter:
-                    self.calibration_optimizer.focal_step()
-                    if not frozen_states and self.allow_lens_distortion:
-                        self.calibration_optimizer.kappa_step()
+    #             # calibration step
+    #             if self.require_calibration and iteration >= self.start_calib_iter and iteration < self.stop_calib_iter:
+    #                 self.calibration_optimizer.focal_step()
+    #                 if not frozen_states and self.allow_lens_distortion:
+    #                     self.calibration_optimizer.kappa_step()
                 
-                # pose step
-                if iteration >= self.start_pose_iter and iteration < self.stop_pose_iter:
-                    self.pose_optimizer.step()
+    #             # pose step
+    #             if iteration >= self.start_pose_iter and iteration < self.stop_pose_iter:
+    #                 self.pose_optimizer.step()
                 
 
-                # Gaussian step
-                if iteration >= self.start_gaussian_iter and iteration < self.stop_gaussian_iter:
-                    self.gaussians.optimizer.step()
+    #             # Gaussian step
+    #             if iteration >= self.start_gaussian_iter and iteration < self.stop_gaussian_iter:
+    #                 self.gaussians.optimizer.step()
 
 
-                if self.use_gui and (iteration % 10 == 0 or frozen_states):
-                    cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
-                    self.push_to_gui(cam_cnt)
-                    if frozen_states:
-                        time.sleep(0.05)
+    #             if self.use_gui and (iteration % 10 == 0 or frozen_states):
+    #                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
+    #                 self.push_to_gui(cam_cnt)
+    #                 if frozen_states:
+    #                     time.sleep(0.05)
 
 
 
-        # focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics(all = True)
-        # LineDetection(focal_stack[:80], focal_grad_stack[:80]).plot_figure(fname = pathlib.Path.home()/( "focal_cost_function_scale"+str(self.gaussian_scale_t)+".pdf" ) )
+    #     # focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics(all = True)
+    #     # LineDetection(focal_stack[:80], focal_grad_stack[:80]).plot_figure(fname = pathlib.Path.home()/( "focal_cost_function_scale"+str(self.gaussian_scale_t)+".pdf" ) )
          
         
 
 
 
 
-        sfm_gui.Log(f"SfM optimization complete with {iteration} iterations.")
+    #     sfm_gui.Log(f"SfM optimization complete with {iteration} iterations.")
 
-        if self.use_gui:
-            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
-            time.sleep(3.0)
+    #     if self.use_gui:
+    #         self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
+    #         time.sleep(3.0)
 
 
 
