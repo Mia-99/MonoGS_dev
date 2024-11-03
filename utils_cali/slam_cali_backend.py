@@ -6,6 +6,7 @@ import torch.multiprocessing as mp
 from tqdm import tqdm
 
 from gaussian_splatting.gaussian_renderer import render
+from gaussian_splatting.utils.general_utils import helper
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
@@ -16,7 +17,7 @@ from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 import numpy as np
 import rich
 from utils.slam_backend import BackEnd
-from utils_cali.eval_cali_utils import eval_cali
+from utils_cali.eval_cali_utils import backend_eval, eval_cali
 
 
 
@@ -190,6 +191,7 @@ class BackEndCali(BackEnd):
                     ### The order of following three matters a lot! ###
                     if self.calibration_optimizers is not None:
                         if (calibration_identifier_cnt == 1): # Don't update 3D structure with one view
+                            self.counter = 0
                             rich.print("[bold green]cali_id_cnt == 1[/bold green]")
                             lr1 = self.config["Training"]["be_focal_lr_cnt_s2"] if ("be_focal_lr_cnt_s2" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr1)
@@ -204,6 +206,7 @@ class BackEndCali(BackEnd):
                             # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*5)
                             # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=30)
                         elif (calibration_identifier_cnt == 2):
+                            self.counter += 1
                             rich.print("[bold green]cali_id_cnt == 2[/bold green]")
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
@@ -212,9 +215,11 @@ class BackEndCali(BackEnd):
                             afle = eval_cali(self.viewpoints, None)
                             rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
                         else:
+                            self.counter += 1
                             rich.print("[bold green]cali_id_cnt != 1 and != 2[/bold green]")
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
-                            self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                            lr = helper(self.counter, lr2, 0.001, lr_delay_steps=2, lr_delay_mult=0.1, max_steps=1000000)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = lr)
                             # test 1 + rgbd + add kf at first + adam -> afle = 7
                             # test 1 + rgbd + add kf at last + adam -> afle = 
                             # test 1 + rgbd + add kf at last + sgd -> afle = 6.8
@@ -242,8 +247,14 @@ class BackEndCali(BackEnd):
                         for cam_id, viewpoint in self.viewpoints.items():
                             if viewpoint.calibration_identifier == current_calibration_identifier:
                                 viewpoint.update_calibration(fx, fy, kappa)
-                    
                     rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calibration_identifier}, iter_per_kf: {iter_per_kf}\n")
+                    
+                    if len(self.viewpoints) > 1:
+                        ate = backend_eval(self.viewpoints, None)
+                        afle = eval_cali(self.viewpoints, None)
+                        rich.print(f"[bold blue]BackEnd  ATE:[/bold blue] [{cur_frame_idx}]: {ate:.6f}\n")
+                        rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
+                    
                     self.push_to_frontend("keyframe")
 
                     # add depth points at last, because these points will not be optimized with one view.
@@ -253,8 +264,9 @@ class BackEndCali(BackEnd):
                         self.map(self.current_window, calibrate=False, iters=iter_per_kf) # don't calibrate with one view. optimize gaussian
                         # self.map(self.current_window, prune=True)
                     
-                    afle = eval_cali(self.viewpoints, None)
-                    rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
+                    
+                    # temp = self.gaussians.copy()
+
                 else:
                     raise Exception("Unprocessed data", data)
         
