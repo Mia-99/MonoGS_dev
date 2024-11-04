@@ -203,6 +203,7 @@ if __name__ == "__main__":
 
 
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    sfm.optimize()
 
     # From dense depth prediction of a neural network
     # if use_pcd_from_depth_prediction:
@@ -230,8 +231,8 @@ if __name__ == "__main__":
     # sfm.allow_lens_distortion = True
     
 
-    sfm_process = mp.Process(target=sfm.optimize)
-    sfm_process.start()
+    # sfm_process = mp.Process(target=sfm.optimize)
+    # sfm_process.start()
 
   
     torch.cuda.synchronize()
@@ -242,8 +243,8 @@ if __name__ == "__main__":
         sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
 
 
-    sfm_process.join()
-    sfm_gui.Log("Finished", tag="SfM")
+    # sfm_process.join()
+    # sfm_gui.Log("Finished", tag="SfM")
     
 
     # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
