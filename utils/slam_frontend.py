@@ -478,9 +478,9 @@ class FrontEnd(mp.Process):
 
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
-                if self.require_calibration and self.initialized and self.signal_calibration_change:
-                    self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, continue_optimize=True) # render again with the best parameters
+                # if self.require_calibration and self.initialized and self.signal_calibration_change:
+                #     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
+                #     render_pkg = self.tracking(cur_frame_idx, viewpoint, continue_optimize=True) # render again with the best parameters
     
 
                 current_window_dict = {}

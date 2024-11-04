@@ -356,7 +356,7 @@ class SFM(mp.Process):
                                            densify_prune = densify_prune,
                                            reset_opacity = reset_opacity
                                            )
-            if iteration % 5 == 0:
+            if self.use_gui and (iteration % 5 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
             if iteration % 10 == 0:
@@ -385,7 +385,7 @@ class SFM(mp.Process):
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
-            if iteration % 5 == 0:
+            if self.use_gui and (iteration % 5 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
             if iteration % 10 == 0:
@@ -412,7 +412,7 @@ class SFM(mp.Process):
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
-            if iteration % 5 == 0:
+            if self.use_gui and (iteration % 5 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
             if iteration % 10 == 0:
