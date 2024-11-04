@@ -336,8 +336,8 @@ class BackEnd(mp.Process):
                 # Structure (3D Gaussian) update
                 if not fix_gaussian:
                     self.gaussians.optimizer.step()
-                    self.gaussians.optimizer.zero_grad(set_to_none=True)
-                    self.gaussians.update_learning_rate(self.iteration_count)
+                self.gaussians.optimizer.zero_grad(set_to_none=True)
+                self.gaussians.update_learning_rate(self.iteration_count)
 
 
         return gaussian_split
