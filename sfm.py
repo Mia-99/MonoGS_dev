@@ -65,10 +65,8 @@ except ImportError:
 class SFM(mp.Process):
 
 
-    def __init__(self, pipe = None, q_main2vis = None, q_vis2main = None, use_gui = True, viewpoint_stack = None, gaussians = None, opt = None, cameras_extent = None) -> None:
+    def __init__(self, pipe = None, use_gui = True, viewpoint_stack = None, gaussians = None, opt = None, cameras_extent = None) -> None:
         self.pipe = pipe
-        self.q_main2vis = q_main2vis
-        self.q_vis2main = q_vis2main
         self.use_gui = use_gui
 
         self.viewpoint_stack = viewpoint_stack
@@ -114,6 +112,24 @@ class SFM(mp.Process):
         self.add_calib_noise_iter = -1
 
         self.gaussian_iter = 0
+        
+
+        self.q_main2vis = mp.Queue() if self.use_gui else FakeQueue()
+        self.q_vis2main = mp.Queue() if self.use_gui else FakeQueue()
+
+        if self.use_gui:
+            bg_color = [0.0, 0.0, 0.0]
+            params_gui = gui_utils.ParamsGUI(
+                pipe=pipe,
+                background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
+                gaussians=self.gaussians if self.gaussians is not None else GaussianModel(0),
+                q_main2vis=self.q_main2vis,
+                q_vis2main=self.q_vis2main,
+            )
+            self.gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
+            self.gui_process.start()
+            time.sleep(3)
+
 
 
     def push_to_gui (self, cam_cnt):
@@ -442,18 +458,25 @@ class SFM(mp.Process):
         self.run_phase1(max_iters = 200)
 
         # Bundle adjustment
-        self.run_phase2(max_iters = 100, update_Gaussian = True, update_pose = False, update_calibration = False)
+        self.run_phase2(max_iters = 50, update_Gaussian = True, update_pose = False, update_calibration = False)
         self.run_phase2(max_iters = 500, update_Gaussian = True, update_pose = True, update_calibration = True)
 
         # refinement using SSIM 
         self.run_phase3(max_iters = 500)
 
-        self.show_rendered_images()
+        # self.show_rendered_images()
 
         sfm_gui.Log(f"SfM optimization complete.")
+        torch.cuda.synchronize()
 
 
-
+    def close(self):
+        torch.cuda.synchronize()
+        if self.use_gui:
+            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+            self.gui_process.join()
+            sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
+    
 
 
     # def optimize_backup (self, update_Gaussian = False, update_pose = False, update_calibration = False,  use_ssim_loss = False):

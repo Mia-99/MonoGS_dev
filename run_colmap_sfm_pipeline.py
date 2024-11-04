@@ -179,31 +179,19 @@ if __name__ == "__main__":
     gaussians.training_setup(opt)
 
 
+
+    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
+
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
     ## visualization
     use_gui = True
-    q_main2vis = mp.Queue() if use_gui else FakeQueue()
-    q_vis2main = mp.Queue() if use_gui else FakeQueue()
-
-    if use_gui:
-        bg_color = [0.0, 0.0, 0.0]
-        params_gui = gui_utils.ParamsGUI(
-            pipe=pipe,
-            background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
-            gaussians=GaussianModel(dataset.sh_degree),
-            q_main2vis=q_main2vis,
-            q_vis2main=q_vis2main,
-        )
-        gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
-        gui_process.start()
-        time.sleep(3)
-
-    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
-
-
-    sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.optimize()
+
+    sfm.show_rendered_images()
+    sfm.close()
+
 
 
     # From dense depth prediction of a neural network
@@ -232,12 +220,12 @@ if __name__ == "__main__":
     # sfm_process.start()
 
   
-    torch.cuda.synchronize()
+    # torch.cuda.synchronize()
 
-    if use_gui:
-        q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-        gui_process.join()
-        sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
+    # if use_gui:
+    #     q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+    #     gui_process.join()
+    #     sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
     
 
     # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
