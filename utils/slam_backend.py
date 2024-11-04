@@ -14,9 +14,8 @@ from utils.slam_utils import get_loss_mapping
 
 from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 import numpy as np
+import copy
 import rich
-
-from utils_cali.eval_cali_utils import backend_eval
 
 
 class BackEnd(mp.Process):
@@ -166,8 +165,7 @@ class BackEnd(mp.Process):
             if cam_idx in current_window_set:
                 continue
             random_viewpoint_stack.append(viewpoint)
-        
-        loss_prev = 10e5
+
         for cur_itr in range(iters):
             if not fix_gaussian:
                 self.iteration_count += 1            
@@ -242,13 +240,8 @@ class BackEnd(mp.Process):
             scaling = self.gaussians.get_scaling
             isotropic_loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1))
             loss_mapping += 10 * isotropic_loss.mean()
-            # rich.print(f"iter: {cur_itr}, loss_mapping: {loss_mapping.item():.3f}, isotropic_loss: {isotropic_loss.mean().item():.3f}")
             loss_mapping.backward()
             gaussian_split = False
-
-            if loss_mapping < loss_prev:
-                loss_prev = loss_mapping
-
             ## Deinsifying / Pruning Gaussians
             with torch.no_grad():
                 self.occ_aware_visibility = {}
@@ -325,25 +318,15 @@ class BackEnd(mp.Process):
                 # Calibration update. only do calibration if slam has been initialized.
                 if calibrate and self.require_calibration and self.initialized:
                     if (self.calibration_optimizers is not None) and (not prune) and (not gaussian_split):
-                        # if to_prune is None:
-                        # if loss_mapping > loss_prev:
-                        #     self.calibration_optimizers.undo_focal_step()
-                        #     self.calibration_optimizers.update_focal_learning_rate(scale=0.5)
                         self.calibration_optimizers.focal_step()
                         if self.allow_lens_distortion and cur_itr > 2:
                             self.calibration_optimizers.kappa_step()
                 if self.calibration_optimizers is not None:
                     self.calibration_optimizers.zero_grad(set_to_none=True)
-                    # self.calibration_optimizers.update_focal_learning_rate(scale=0.8)
 
                 # Pose update
-                if self.keyframe_optimizers is not None:
-                    # plot pose gradient
-                    for group in self.keyframe_optimizers.param_groups:
-                        if 'trans' in group['name']:
-                            rich.print(f"iter: {cur_itr}, {group['name']}: {group['params'][0].grad.norm().item():.3f}")
-                    self.keyframe_optimizers.step()
-                    self.keyframe_optimizers.zero_grad(set_to_none=True)
+                self.keyframe_optimizers.step()
+                self.keyframe_optimizers.zero_grad(set_to_none=True)
                 for cam_idx in range(min(frames_to_optimize, len(current_window))):
                     viewpoint = viewpoint_stack[cam_idx]
                     if viewpoint.uid == 0:
@@ -351,39 +334,10 @@ class BackEnd(mp.Process):
                     update_pose(viewpoint)
 
                 # Structure (3D Gaussian) update
-                # if not fix_gaussian:
-                #     self.gaussians.optimizer.step()
-                #     self.gaussians.optimizer.zero_grad(set_to_none=True)
-                #     self.gaussians.update_learning_rate(self.iteration_count)
-                if self.calibration_optimizers is not None:
-                    is_adam_optimizer = self.calibration_optimizers.focal_optimizer.__class__.__name__ == 'Adam'
-                    is_cur_itr_gt_5 = cur_itr > 5
-                else:
-                    is_adam_optimizer = False
-                    is_cur_itr_gt_5 = False
                 if not fix_gaussian:
                     self.gaussians.optimizer.step()
-                    self.gaussians.optimizer.zero_grad(set_to_none=True)
-                    self.gaussians.update_learning_rate(self.iteration_count)
-                ate = backend_eval(self.viewpoints, None)
-                rich.print(f"iter: {cur_itr}, loss_mapping: {loss_mapping.item():.3f}, ate: {ate:.3f}")
-                # if self.calibration_optimizers is not None:
-                #     if self.calibration_optimizers.focal_optimizer.__class__.__name__ == 'Adam' and cur_itr > 0:
-                #         if  not fix_gaussian:
-                #             self.gaussians.optimizer.step()
-                #             self.gaussians.optimizer.zero_grad(set_to_none=True)
-                #             self.gaussians.update_learning_rate(self.iteration_count)
-                #     elif self.calibration_optimizers.focal_optimizer.__class__.__name__ == 'SGD':
-                #         if  not fix_gaussian:
-                #             self.gaussians.optimizer.step()
-                #             self.gaussians.optimizer.zero_grad(set_to_none=True)
-                #             self.gaussians.update_learning_rate(self.iteration_count)
-                # else:
-                #     if  not fix_gaussian:
-                #         self.gaussians.optimizer.step()
-                #         self.gaussians.optimizer.zero_grad(set_to_none=True)
-                #         self.gaussians.update_learning_rate(self.iteration_count)
-                
+                self.gaussians.optimizer.zero_grad(set_to_none=True)
+                self.gaussians.update_learning_rate(self.iteration_count)
 
 
         return gaussian_split
@@ -430,7 +384,8 @@ class BackEnd(mp.Process):
         keyframes = []
         for kf_idx in self.current_window:
             kf = self.viewpoints[kf_idx]
-            keyframes.append((kf_idx, kf.R.clone(), kf.T.clone(), kf.fx, kf.fy, kf.kappa))
+            kf_calib = copy.deepcopy([kf.fx, kf.fy, kf.kappa])
+            keyframes.append((kf_idx, kf.R.clone(), kf.T.clone(), kf_calib))
         if tag is None:
             tag = "sync_backend"
         msg = [tag, clone_obj(self.gaussians), self.occ_aware_visibility, keyframes]
