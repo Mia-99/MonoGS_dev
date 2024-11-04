@@ -14,6 +14,7 @@ from utils.slam_utils import get_loss_mapping
 
 from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 import numpy as np
+import copy
 import rich
 
 
@@ -383,7 +384,8 @@ class BackEnd(mp.Process):
         keyframes = []
         for kf_idx in self.current_window:
             kf = self.viewpoints[kf_idx]
-            keyframes.append((kf_idx, kf.R.clone(), kf.T.clone(), kf.fx, kf.fy, kf.kappa))
+            kf_calib = copy.deepcopy([kf.fx, kf.fy, kf.kappa])
+            keyframes.append((kf_idx, kf.R.clone(), kf.T.clone(), kf_calib))
         if tag is None:
             tag = "sync_backend"
         msg = [tag, clone_obj(self.gaussians), self.occ_aware_visibility, keyframes]
