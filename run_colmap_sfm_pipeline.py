@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from gaussian_splatting.utils.graphics_utils import BasicPointCloud
 from gaussian_splatting.scene.gaussian_model_GS import GaussianModel
 from gaussian_splatting.scene.cameras import Camera
-from gui import gui_utils, sfm_gui
+from gui import gui_utils, sfm_gui, slam_gui
 
 import time
 from argparse import ArgumentParser, Namespace
@@ -205,14 +205,11 @@ if __name__ == "__main__":
     sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.optimize()
 
+
     # From dense depth prediction of a neural network
     # if use_pcd_from_depth_prediction:
     #     positions, colors = init_dense_pcd_from_network(viewpoint_stack, reconstruction, num_points = 50000)
     #     sfm.add_dense_point_cloud(positions=positions, colors=colors)
-
-
-    sfm.MODULE_TEST_CALIBRATION = False
-
     
 
     # sfm.start_calib_iter = 250
@@ -237,14 +234,10 @@ if __name__ == "__main__":
   
     torch.cuda.synchronize()
 
-
     if use_gui:
+        q_main2vis.put(gui_utils.GaussianPacket(finish=True))
         gui_process.join()
         sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
-
-
-    # sfm_process.join()
-    # sfm_gui.Log("Finished", tag="SfM")
     
 
     # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))

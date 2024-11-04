@@ -27,29 +27,11 @@ from gui.gui_utils import (
     get_latest_queue,
 )
 
-from gaussian_splatting.scene.cameras import Camera
-
-
-
 
 import rich
 
-_log_styles = {
-    "SFM": "bold green",
-    "GUI": "bold magenta",
-    "Eval": "bold red",
-}
-
-def get_style(tag):
-    if tag in _log_styles.keys():
-        return _log_styles[tag]
-    return "bold blue"
-
-def Log(*args, tag="SFM"):
-    style = get_style(tag)
-    rich.print(f"[{style}]{tag}:[/{style}]", *args)
-
-
+from utils.logging_utils import Log
+from gaussian_splatting.scene.cameras import Camera
 
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
@@ -57,14 +39,8 @@ o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
 
 
-
-
 class SFM_GUI:
     def __init__(self, params_gui=None):
-
-        app = o3d.visualization.gui.Application.instance
-        app.initialize()
-
         self.step = 0
         self.process_finished = False
         self.device = "cuda"
@@ -107,8 +83,6 @@ class SFM_GUI:
         self.save_path.mkdir(parents=True, exist_ok=True)
 
         threading.Thread(target=self._update_thread).start()
-
-        app.run()
 
 
 
@@ -264,13 +238,6 @@ class SFM_GUI:
         tab_info.add_child(self.in_depth_widget)
 
         tabs.add_tab("Info", tab_info)
-
-
-        tab_calib = gui.Vert(0, tab_margins)
-        tab_calib.add_child(self.calib_info)
-        tabs.add_tab("Calibration", tab_calib)
-
-
         self.panel.add_child(tabs)
         self.window.add_child(self.panel)
 
@@ -441,11 +408,11 @@ class SFM_GUI:
 
     def receive_data(self, q):
         if q is None:
-            return False
+            return
 
         gaussian_packet = get_latest_queue(q)
         if gaussian_packet is None:
-            return False
+            return
 
         if gaussian_packet.has_gaussians:
             self.gaussian_cur = gaussian_packet
@@ -475,7 +442,6 @@ class SFM_GUI:
                 gaussian_packet.current_frame.cy,
                 gaussian_packet.current_frame.kappa, gaussian_packet.current_frame.kappa_init,
             )
-
 
 
         if gaussian_packet.keyframe is not None:
@@ -518,7 +484,6 @@ class SFM_GUI:
             rgb = o3d.geometry.Image(depth)
             self.in_depth_widget.update_image(rgb)
 
-
         if gaussian_packet.finish:
             Log("Received terminate signal", tag="GUI")
             # clean up the pipe
@@ -529,9 +494,6 @@ class SFM_GUI:
             self.q_vis2main = None
             self.q_main2vis = None
             self.process_finished = True
-            return False
-
-        return True
     
 
     @staticmethod
@@ -762,6 +724,10 @@ class SFM_GUI:
         self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)
 
 
+    def scene_update(self):
+        self.receive_data(self.q_main2vis)
+        self.render_gui()
+
     def _update_thread(self):
         while True:
             time.sleep(0.01)
@@ -769,12 +735,11 @@ class SFM_GUI:
             if self.process_finished: 
                 o3d.visualization.gui.Application.instance.quit()                            
                 Log("Closing Visualization", tag="GUI")
-                return
+                break
 
             def update():                
                 if self.step % 3 == 0:
-                    self.receive_data(self.q_main2vis)                    
-                    self.render_gui()
+                    self.scene_update()
 
                 if self.step >= 1e9:
                     self.step = 0
@@ -784,13 +749,18 @@ class SFM_GUI:
 
 
 def run(params_gui=None):
+    app = o3d.visualization.gui.Application.instance
+    app.initialize()
     win = SFM_GUI(params_gui)
-
+    app.run()
 
 
 def main():
+    app = o3d.visualization.gui.Application.instance
+    app.initialize()
     win = SFM_GUI()
-
+    app.run()
+    
 
 if __name__ == "__main__":
     main()

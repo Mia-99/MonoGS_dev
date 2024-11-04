@@ -1,14 +1,3 @@
-#
-# Copyright (C) 2023, Inria
-# GRAPHDECO research group, https://team.inria.fr/graphdeco
-# All rights reserved.
-#
-# This software is free for non-commercial, research and evaluation use 
-# under the terms of the LICENSE.md file.
-#
-# For inquiries contact  george.drettakis@inria.fr
-#
-
 
 import os
 import sys
@@ -137,8 +126,8 @@ class SFM(mp.Process):
         self.q_main2vis.put(
             gui_utils.GaussianPacket(
                 gaussians=clone_obj(self.gaussians),
-                keyframes=copy.deepcopy(self.viewpoint_stack),
-                current_frame=clone_obj(self.viewpoint_stack[cam_cnt]),
+                keyframes=self.viewpoint_stack,
+                current_frame=self.viewpoint_stack[cam_cnt],
                 gtcolor=self.viewpoint_stack[cam_cnt].original_image,
                 gtdepth=depth,
             )
@@ -456,22 +445,14 @@ class SFM(mp.Process):
         self.run_phase2(max_iters = 100, update_Gaussian = True, update_pose = False, update_calibration = False)
         self.run_phase2(max_iters = 500, update_Gaussian = True, update_pose = True, update_calibration = True)
 
-        # # refinement using SSIM 
+        # refinement using SSIM 
         self.run_phase3(max_iters = 500)
-
-        sfm_gui.Log(f"SfM optimization complete.")
 
         self.show_rendered_images()
 
-        if self.use_gui:
-            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))  
-            time.sleep(3.0)
+        sfm_gui.Log(f"SfM optimization complete.")
 
-        # Fig = Viewer(viewpoint_stack=self.viewpoint_stack,
-        #              gaussians_gl= create_gaussians_gl(clone_obj(self.gaussians)) 
-        #             )
 
-        
 
 
 
