@@ -35,7 +35,7 @@ from gui import gui_utils, sfm_gui
 from utils.multiprocessing_utils import FakeQueue, clone_obj
 
 
-from depth_anything import DepthAnything
+# from depth_anything import DepthAnything
 
 
 from optimizers import CalibrationOptimizer, PoseOptimizer, LineDetection, lr_exp_decay_helper
@@ -98,7 +98,7 @@ class SFM(mp.Process):
 
 
         self.cameras_extent = cameras_extent
-        self.depth_anything = DepthAnything()
+        # self.depth_anything = DepthAnything()
 
         self.calibration_optimizer = None
         self.pose_optimizer = None
@@ -458,7 +458,7 @@ class SFM(mp.Process):
         self.run_phase1(max_iters = 200)
 
         # Bundle adjustment
-        self.run_phase2(max_iters = 50, update_Gaussian = True, update_pose = False, update_calibration = False)
+        self.run_phase2(max_iters = 100, update_Gaussian = True, update_pose = False, update_calibration = False)
         self.run_phase2(max_iters = 500, update_Gaussian = True, update_pose = True, update_calibration = True)
 
         # refinement using SSIM 
