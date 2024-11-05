@@ -116,11 +116,11 @@ class Viewer:
         gl.glDepthFunc(gl.GL_LEQUAL)
 
         self.render_img = self.render_o3d_image()
-        self.widget3d.scene.set_background([1, 1, 1, 1], self.render_img)
+        self.widget3d.scene.set_background([1, 1, 1, 1], self.render_img) # alpha
 
 
         self.is_done = False
-        threading.Thread(target=self._update_thread).start()
+        threading.Thread(target=self._update_thread).start() #
 
         app.run()
         glfw.terminate()
@@ -420,7 +420,7 @@ def main():
     camera_traj_path = "/datasets/replica_small/office0/traj.txt"
     # gaussians_path = "./results/monocular/replica_small_cali/office0_v0/2024-10-21-09-48-50/point_cloud/final/point_cloud.ply"
     # gaussians_gl = util_gau.load_ply(gaussians_path)
-    gaussians_path = "./results/monocular/replica_small_cali/office0_v0/2024-10-21-09-48-50/gs/instance.pkl"
+    gaussians_path = "/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-04-22-05-14/gs/instance.pkl"
 
 
     cam_infos = load_replica_poses (camera_traj_path)
@@ -428,6 +428,8 @@ def main():
         gaussians = pickle.load(f)
     # print(gaussians)
     gaussians_gl = gaussian_model_to_gaussian_data(gaussians)
+    # image rendering
+    
 
     Fig = Viewer(viewpoint_stack=cam_infos,  gaussians_gl= gaussians_gl)
     # Fig = Viewer(viewpoint_stack=cam_infos)
