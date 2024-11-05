@@ -555,11 +555,11 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers.zero_grad()
 
                     
-                    if self.require_calibration and self.initialized and self.calibration_identifier_cnt >= 1 and current_calibration_identifier != 0:
+                    if self.require_calibration and self.initialized and self.calibration_identifier_cnt >= 1 and current_calibration_identifier != 0 and (not self.calibration_initialized):
                         H = viewpoint.image_height
                         W = viewpoint.image_width
                         focal_ref = np.sqrt(H*H + W*W)/2
-                        rich.print("[bold green]calibration optimizer[/bold green]. current_window: ", current_window)    
+                        rich.print("[bold green]calibration optimizer[/bold green]. current_window: ", self.current_window)    
                         self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam")
                         self.calibration_optimizers.num_line_elements = 0 # sample points for line fitting
                     else:
@@ -578,7 +578,14 @@ class BackEnd(mp.Process):
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # more iters for two views
-                            self.map(self.current_window, prune=True, iters=5)
+                            # self.map(self.current_window, prune=True, iters=1)
+
+                        # elif (self.calibration_identifier_cnt == len(self.current_window)):
+                        #     lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
+                        #     self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                        #     self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*3) # BA with full window
+                        #     # self.map(self.current_window, prune=True)
+                        #     self.calibration_initialized = True
 
                         else:
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
@@ -586,6 +593,7 @@ class BackEnd(mp.Process):
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
                     else:
                         self.map(self.current_window, iters=iter_per_kf)
+                    
                     self.map(self.current_window, prune=True)
 
                     # update all cameras with the most recent calibration_identifier
