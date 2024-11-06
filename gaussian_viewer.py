@@ -145,11 +145,11 @@ class Viewer:
     def plot_trajectory(self):
         if (self.viewpoint_stack is None):
             return
-        for camera in self.viewpoint_stack:
-            name = "cam{}_".format(camera.uid)
-            self.add_camera(camera, name, color=[0, 1, 0], size=self.camera_size)
+        # for camera in self.viewpoint_stack:
+        #     name = "cam{}_".format(camera.uid)
+        #     self.add_camera(camera, name, color=[0, 1, 0], size=self.camera_size)
 
-        odometry_line_set = self.create_trajectory_lineset(color=[0, 0, 1])
+        odometry_line_set = self.create_trajectory_lineset(color=[0, 1, 1]) #rgb
         self.widget3d.scene.add_geometry("trajectory", odometry_line_set, self.lit)
 
 
@@ -267,7 +267,7 @@ class Viewer:
     def render_o3d_image(self):
 
         (T, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
-
+        # set a specific T
         WIDTH, HEIGHT = self.g_camera.w, self.g_camera.h
         self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
         self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
@@ -293,6 +293,7 @@ class Viewer:
         self.g_camera.position = frustum.eye.astype(np.float32)
         self.g_camera.target = frustum.center.astype(np.float32)
         self.g_camera.up = frustum.up.astype(np.float32)
+        print(self.g_camera.__dict__)
 
         self.update_activated_renderer_state(self.gaussians_gl)
         self.g_renderer.sort_and_update(self.g_camera)
