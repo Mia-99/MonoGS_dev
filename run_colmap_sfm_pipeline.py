@@ -1,4 +1,5 @@
 
+from datetime import datetime
 import sys, os
 
 import torch
@@ -33,13 +34,14 @@ from colmap import assemble_3DGS_cameras
 
 
 from gaussian_viewer import Viewer, create_gaussians_gl
+from utils_cali.eval_cali_utils import eval_ate, eval_rendering
 
 
 def init_dense_pcd_from_network (viewpoint_stack, reconstruction: ColMap, num_points = 20000):
 
     pcd_downsample_factor = viewpoint_stack[0].image_height * viewpoint_stack[0].image_width * len(viewpoint_stack) / num_points
 
-    DA = DepthAnything()
+    DA = DepthAnything(encoder = 'vits')
 
     positions = None
     colors = None
@@ -148,7 +150,8 @@ if __name__ == "__main__":
     '''
     
     data_url = "https://cvg-data.inf.ethz.ch/local-feature-evaluation-schoenberger2017/Strecha-Fountain.zip"
-    image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+    # image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+    image_dir = "/datasets/Strecha-Herzjesu/Herzjesu/images"
     '''
     ground_truth calibration:
         2759.48 0 1520.69
@@ -189,8 +192,19 @@ if __name__ == "__main__":
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.optimize()
 
-    sfm.show_rendered_images()
-    sfm.close()
+    # sfm.show_rendered_images()
+    # sfm.close()
+    print("SFM finished, start to evaluate")
+    # eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
+    current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    path = "./results/sfm/" + image_dir.split("/")[-2] + "/" + current_datetime
+    # print(sfm.viewpoint_stack[0].__dict__)
+    eval_ate(sfm.viewpoint_stack, [i for i in range(len(sfm.viewpoint_stack))], save_dir=path, iterations=0, final=True, monocular=True)
+    eval_rendering(sfm.viewpoint_stack, sfm.gaussians, dataset, save_dir=path, pipe=pipe, background=None, kf_indices=[i for i in range(len(sfm.viewpoint_stack))], iteration="final")
+    
+
+
+    # evaluate gt
 
 
 
