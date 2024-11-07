@@ -98,7 +98,7 @@ class SFM(mp.Process):
 
 
         self.cameras_extent = cameras_extent
-        self.depth_anything = DepthAnything()
+        self.depth_anything = DepthAnything(encoder = 'vits')
 
         self.calibration_optimizer = None
         self.pose_optimizer = None
