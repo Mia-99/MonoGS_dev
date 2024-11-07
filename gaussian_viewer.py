@@ -286,8 +286,13 @@ class Viewer:
         self.g_camera.fovy = FoVy
         self.g_camera.update_resolution(self.window.size.height, w)
         self.g_renderer.set_render_reso(w, self.window.size.height)
+        # 'position': array([-2.2748837,  1.8331163,  0.6048547], dtype=float32), 'target': array([-2.2388566 ,  1.8168677 ,  0.59868836], dtype=float32), 'up': array([0.00390775, 0.00123555, 0.01957557], dtype=float32), 'yaw': -1.5707963267948966, 'pitch': 0, 
+        # np.array(glm.lookAt(self.position, self.target, self.up))
+        import glm
+        view_matrix = np.array(glm.lookAt(np.array([-2.2748837,  1.8331163,  0.6048547], dtype=np.float32), np.array([-2.2388566 ,  1.8168677 ,  0.59868836], dtype=np.float32), np.array([0.00390775, 0.00123555, 0.01957557], dtype=np.float32)))
+        # view_matrix = self.widget3d.scene.camera.get_view_matrix()
         frustum = create_frustum(
-            np.linalg.inv(cv_gl @ self.widget3d.scene.camera.get_view_matrix())
+            np.linalg.inv(cv_gl @ view_matrix)
         )
 
         self.g_camera.position = frustum.eye.astype(np.float32)
