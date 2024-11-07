@@ -48,6 +48,8 @@ class BackEnd(mp.Process):
         self.require_calibration = False
         self.allow_lens_distortion = False
         self.signal_calibration_change = False
+        self.calibration_identifier_cnt = 0
+        self.calibration_initialized = True
 
 
     def set_hyperparams(self):
@@ -461,8 +463,7 @@ class BackEnd(mp.Process):
 
                     rich.print(f"[bold blue]BackEnd  Receive :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calibration_identifier}")
 
-                    current_calibration_identifier = viewpoint.calibration_identifier
-                    calibration_identifier_cnt = 0                    
+                    current_calibration_identifier = viewpoint.calibration_identifier                  
 
                     if len(self.current_window):
                         last_keyframe = self.viewpoints[ self.current_window[0] ]
@@ -471,6 +472,12 @@ class BackEnd(mp.Process):
                             self.signal_calibration_change = False
                         else:
                             self.signal_calibration_change = True
+
+                    if self.signal_calibration_change:
+                        self.calibration_initialized = False
+                        self.calibration_identifier_cnt = 0
+                    self.calibration_identifier_cnt += 1
+
 
                     rich.print(f"[bold blue]BackEnd  InitEst :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calibration_identifier}")
 
@@ -529,7 +536,6 @@ class BackEnd(mp.Process):
                                 }
                             )
                             calib_opt_frames_stack.append(viewpoint)
-                            calibration_identifier_cnt += 1 if viewpoint.calibration_identifier == current_calibration_identifier else 0
 
                         pose_opt_params.append(
                             {
@@ -549,11 +555,11 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers.zero_grad()
 
                     
-                    if self.require_calibration and self.initialized and calibration_identifier_cnt >= 1 and current_calibration_identifier != 0:
+                    if self.require_calibration and self.initialized and self.calibration_identifier_cnt >= 1 and current_calibration_identifier != 0 and (not self.calibration_initialized):
                         H = viewpoint.image_height
                         W = viewpoint.image_width
                         focal_ref = np.sqrt(H*H + W*W)/2
-                        rich.print("[bold green]calibration optimizer[/bold green]. current_window: ", current_window)    
+                        rich.print("[bold green]calibration optimizer[/bold green]. current_window: ", self.current_window)    
                         self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam")
                         self.calibration_optimizers.num_line_elements = 0 # sample points for line fitting
                     else:
@@ -563,30 +569,32 @@ class BackEnd(mp.Process):
 
                     ### The order of following three matters. prune goes last ###
                     if self.calibration_optimizers is not None:
-                        if (calibration_identifier_cnt == 1): # Don't update 3D structure with one view
+                        if (self.calibration_identifier_cnt == 1): # Don't update 3D structure with one view
                             lr1 = self.config["Training"]["be_focal_lr_cnt_s2"] if ("be_focal_lr_cnt_s2" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr1)
                             self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=iter_per_kf*3)
-                            # self.calibration_optimizers.update_focal_learning_rate(0.0025) #0.01 2024-10-15-06-10-34;   0.001 2024-10-14-20-37-38
-                            # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=10)
-                            # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=iter_per_kf*1)
-                            # self.calibration_optimizers.update_focal_learning_rate(0.0025) #0.01 2024-10-15-06-10-34;   0.0025 2024-10-14-20-37-38
-                            # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*3)
-                            # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*5)
-                            # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=30)
-                        elif (calibration_identifier_cnt == 2):
+
+                        elif (self.calibration_identifier_cnt == 2):
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # more iters for two views
-                            self.map(self.current_window, prune=True, iters=5)
 
+                        elif (self.calibration_identifier_cnt == len(self.current_window)):
+                            lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
+                            self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                            self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # BA with full window
+                            
                         else:
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
                     else:
                         self.map(self.current_window, iters=iter_per_kf)
+                    
                     self.map(self.current_window, prune=True)
+
+                    if self.calibration_identifier_cnt == 10: # number of keyframes after calibration change
+                        self.calibration_initialized = True
 
                     # update all cameras with the most recent calibration_identifier
                     if self.calibration_optimizers is not None:

@@ -1,5 +1,4 @@
 
-from datetime import datetime
 import sys, os
 
 import torch
@@ -28,58 +27,56 @@ import open3d as o3d
 
 
 from sfm import SFM
-from depth_anything import DepthAnything
 from colmap import ColMap
 from colmap import assemble_3DGS_cameras
 
-
 from gaussian_viewer import Viewer, create_gaussians_gl
-from utils_cali.eval_cali_utils import eval_ate, eval_rendering
 
 
-def init_dense_pcd_from_network (viewpoint_stack, reconstruction: ColMap, num_points = 20000):
+# from depth_anything import DepthAnything
+# def init_dense_pcd_from_network (viewpoint_stack, reconstruction: ColMap, num_points = 20000):
 
-    pcd_downsample_factor = viewpoint_stack[0].image_height * viewpoint_stack[0].image_width * len(viewpoint_stack) / num_points
+#     pcd_downsample_factor = viewpoint_stack[0].image_height * viewpoint_stack[0].image_width * len(viewpoint_stack) / num_points
 
-    DA = DepthAnything(encoder = 'vits')
+#     DA = DepthAnything()
 
-    positions = None
-    colors = None
+#     positions = None
+#     colors = None
 
-    for cam in viewpoint_stack:
+#     for cam in viewpoint_stack:
 
-        sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = cam.uid, downsample_scale = downsample_scale )
-        rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+#         sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = cam.uid, downsample_scale = downsample_scale )
+#         rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
 
-        # use depth prediction from a Neural network
-        disp_raw = DA.eval(rgb_raw)
-        depth_raw = 10.0 / disp_raw  # depth = (focal * baseline) / disparity
+#         # use depth prediction from a Neural network
+#         disp_raw = DA.eval(rgb_raw)
+#         depth_raw = 10.0 / disp_raw  # depth = (focal * baseline) / disparity
 
-        # depth_rect = DA.correct_depth_from_sparse_points (depth=depth_raw, uv_depth_stack=sparse_depth_stack)
+#         # depth_rect = DA.correct_depth_from_sparse_points (depth=depth_raw, uv_depth_stack=sparse_depth_stack)
 
-        scale = DA.estimateScaleFactor(depth=depth_raw, uv_depth_stack=sparse_depth_stack)
-        depth_rect = depth_raw * scale
-        print(f"depth scale correction = {scale}, rgb_raw.shape = {rgb_raw.shape} depth_raw.shape = {depth_raw.shape}, depth_rect.shape = {depth_rect.shape}")
-
-
-        if False:
-            plt.rcParams["figure.figsize"] = (15, 6)
-            fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3)
-            ax1.imshow(rgb_raw)
-            ax2.imshow(depth_raw)
-            ax3.imshow(depth_rect)
-            plt.show()
+#         scale = DA.estimateScaleFactor(depth=depth_raw, uv_depth_stack=sparse_depth_stack)
+#         depth_rect = depth_raw * scale
+#         print(f"depth scale correction = {scale}, rgb_raw.shape = {rgb_raw.shape} depth_raw.shape = {depth_raw.shape}, depth_rect.shape = {depth_rect.shape}")
 
 
-        # RGB-D image to pcd in world frame
-        rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
-        depth = o3d.geometry.Image(depth_rect.astype(np.float32))
-        new_xyz, new_rgb = GaussianModel.create_pcd_from_image_and_depth(cam, rgb, depth, downsample_factor = pcd_downsample_factor)
+#         if False:
+#             plt.rcParams["figure.figsize"] = (15, 6)
+#             fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3)
+#             ax1.imshow(rgb_raw)
+#             ax2.imshow(depth_raw)
+#             ax3.imshow(depth_rect)
+#             plt.show()
+
+
+#         # RGB-D image to pcd in world frame
+#         rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
+#         depth = o3d.geometry.Image(depth_rect.astype(np.float32))
+#         new_xyz, new_rgb = GaussianModel.create_pcd_from_image_and_depth(cam, rgb, depth, downsample_factor = pcd_downsample_factor)
         
-        positions = np.concatenate((positions, new_xyz), axis=0) if positions is not None else new_xyz
-        colors = np.concatenate((colors, new_rgb), axis=0) if colors is not None else new_rgb
+#         positions = np.concatenate((positions, new_xyz), axis=0) if positions is not None else new_xyz
+#         colors = np.concatenate((colors, new_rgb), axis=0) if colors is not None else new_rgb
 
-    return positions, colors
+#     return positions, colors
 
 
 
@@ -150,8 +147,7 @@ if __name__ == "__main__":
     '''
     
     data_url = "https://cvg-data.inf.ethz.ch/local-feature-evaluation-schoenberger2017/Strecha-Fountain.zip"
-    # image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
-    image_dir = "/datasets/Strecha-Herzjesu/Herzjesu/images"
+    image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
     '''
     ground_truth calibration:
         2759.48 0 1520.69
@@ -191,21 +187,10 @@ if __name__ == "__main__":
     use_gui = True
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.optimize()
+    sfm.close()
 
-    # sfm.show_rendered_images()
-    # sfm.close()
-    print("SFM finished, start to evaluate")
-    # eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
-    current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    path = "./results/sfm/" + image_dir.split("/")[-2] + "/" + current_datetime
-    # print(sfm.viewpoint_stack[0].__dict__)
-    eval_ate(sfm.viewpoint_stack, [i for i in range(len(sfm.viewpoint_stack))], save_dir=path, iterations=0, final=True, monocular=True)
-    eval_rendering(sfm.viewpoint_stack, sfm.gaussians, dataset, save_dir=path, pipe=pipe, background=None, kf_indices=[i for i in range(len(sfm.viewpoint_stack))], iteration="final")
+    sfm.show_rendered_images()
     
-
-
-    # evaluate gt
-
 
 
     # From dense depth prediction of a neural network
