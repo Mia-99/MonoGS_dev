@@ -264,7 +264,7 @@ class Viewer:
 
 
 
-    def render_o3d_image(self):
+    def render_o3d_image(self, init=False):
 
         (T, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
         # set a specific T
@@ -287,10 +287,19 @@ class Viewer:
         self.g_camera.update_resolution(self.window.size.height, w)
         self.g_renderer.set_render_reso(w, self.window.size.height)
         # 'position': array([-2.2748837,  1.8331163,  0.6048547], dtype=float32), 'target': array([-2.2388566 ,  1.8168677 ,  0.59868836], dtype=float32), 'up': array([0.00390775, 0.00123555, 0.01957557], dtype=float32), 'yaw': -1.5707963267948966, 'pitch': 0, 
+        # 'position': array([-1.969727  , -0.27521744,  1.0595742 ], dtype=float32), 'target': array([-1.9359106 , -0.25898242,  1.0456866 ], dtype=float32), 'up': array([0.00250291, 0.00962823, 0.01735029], dtype=float32), 'yaw': -1.5707963267948966, 'pitch': 0, 
         # np.array(glm.lookAt(self.position, self.target, self.up))
         import glm
-        view_matrix = np.array(glm.lookAt(np.array([-2.2748837,  1.8331163,  0.6048547], dtype=np.float32), np.array([-2.2388566 ,  1.8168677 ,  0.59868836], dtype=np.float32), np.array([0.00390775, 0.00123555, 0.01957557], dtype=np.float32)))
-        # view_matrix = self.widget3d.scene.camera.get_view_matrix()
+        if init:
+    #         {'znear': 1e-05, 'zfar': 100, 'h': 400, 'w': 600, 'fovy': 0.7853981633974483, 'position': array([ 0.13565731, -1.8456919 ,  0.92429584], dtype=float32), 'target': array([ 0.1358233, -1.8072113,  0.9133772], dtype=float32), 'up': array([0.00123288, 0.00544405, 0.01920526], dtype=float32), 'yaw': -1.5707963267948966, 'pitch': 0, 'is_pose_dirty': True, 'is_intrin_dirty': True, 'last_x': 0, 'last_y': 0, 'first_mouse': True, 'is_leftmouse_pressed': False, 'is_rightmouse_pressed': False, 'rot_sensitivity': 0.02, 'trans_sensitivity': 0.01, 'zoom_sensitivity': 0.08, 'roll_sensitivity': 0.03, 'target_dist': 3.0, 'view_matrix': array([[1., 0., 0., 0.],
+    #    [0., 1., 0., 0.],
+    #    [0., 0., 1., 0.],
+    # #    [0., 0., 0., 1.]], dtype=float32)}
+            # {'znear': 1e-05, 'zfar': 100, 'h': 400, 'w': 600, 'fovy': 0.7853981633974483, 'position': array([-0.00516705, -1.7392821 ,  0.793345  ], dtype=float32), 'target': array([-0.00278952, -1.7004831 ,  0.7839122 ], dtype=float32), 'up': array([-8.7181124e-06,  4.7252509e-03,  1.9433785e-02], dtype=float32), 'yaw': -1.5707963267948966, 'pitch': 0, 'is_pose_dirty': True, 'is_intrin_dirty': True, 'last_x': 0, 'last_y': 0, 'first_mouse': True, 'is_leftmouse_pressed': False, 'is_rightmouse_pressed': False, 'rot_sensitivity': 0.02, 'trans_sensitivity': 0.01, 'zoom_sensitivity': 0.08, 'roll_sensitivity': 0.03, 'target_dist': 3.0, 'view_matrix': array([[1., 0., 0., 0.],
+            # view_matrix = np.array(glm.lookAt(np.array([-2.2748837,  1.8331163,  0.6048547], dtype=np.float32), np.array([-2.2388566 ,  1.8168677 ,  0.59868836], dtype=np.float32), np.array([0.00390775, 0.00123555, 0.01957557], dtype=np.float32)))
+            view_matrix = np.array(glm.lookAt(np.array([-1.969727  , -0.27521744,  1.0595742], dtype=np.float32), np.array([-1.9359106 , -0.25898242,  1.0456866], dtype=np.float32), np.array([0.00250291, 0.00962823, 0.01735029], dtype=np.float32)))
+        else:
+            view_matrix = self.widget3d.scene.camera.get_view_matrix()
         frustum = create_frustum(
             np.linalg.inv(cv_gl @ view_matrix)
         )
@@ -426,7 +435,7 @@ def main():
     camera_traj_path = "/datasets/replica_small/office0/traj.txt"
     # gaussians_path = "./results/monocular/replica_small_cali/office0_v0/2024-10-21-09-48-50/point_cloud/final/point_cloud.ply"
     # gaussians_gl = util_gau.load_ply(gaussians_path)
-    gaussians_path = "/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-04-22-05-14/gs/instance.pkl"
+    gaussians_path = "/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-07-22-15-28/gs/instance.pkl"
 
 
     cam_infos = load_replica_poses (camera_traj_path)
