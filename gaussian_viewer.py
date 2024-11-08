@@ -139,8 +139,8 @@ class Viewer:
         For visualize 3DGS ellipsoids
         """
         self.g_camera = util.Camera(h=self.HEIGHT, w=self.WIDTH)
-        self.window_gl = self.init_glfw(self.WIDTH, self.HEIGHT)
-        self.g_renderer = render_ogl.OpenGLRenderer(self.g_camera.w, self.g_camera.h)
+        self.window_gl = None
+        self.g_renderer = None
 
         gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glEnable(gl.GL_DEPTH_TEST)
@@ -168,7 +168,6 @@ class Viewer:
 
         self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
         self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)
-
         self.save_figure()
 
         # a thread that helps to update view-control
@@ -195,18 +194,26 @@ class Viewer:
         return window
 
 
-    def plot_cameras(self, viewpoint_stack = None):
+    def plot_cameras(self, viewpoint_stack = None, color = [0, 1, 0], camera_size=0.1):
         if (viewpoint_stack is None):
             return
         for camera in viewpoint_stack:
             name = "cam{}_".format(camera.uid)
-            self.add_camera(camera, name, color=[0, 1, 0], size=self.camera_size)
+            self.add_camera(camera, name, color=color, size=camera_size)
 
 
-    def plot_trajectory(self, viewpoint_stack = None):
+    def plot_trajectory(self, viewpoint_stack = None, colors = None):
         if (viewpoint_stack is None):
-            return
-        odometry_line_set = self.create_trajectory_lineset(viewpoint_stack, color=[0, 0, 1])
+            return        
+        (points, lines) = self.create_trajectory_lineset(viewpoint_stack)
+        if colors is None:
+            colors = [ [0, 0, 1]  for i in range(len(lines))]
+
+        odometry_line_set = o3d.geometry.LineSet()
+        odometry_line_set.points = o3d.utility.Vector3dVector(points)
+        odometry_line_set.lines = o3d.utility.Vector2iVector(lines)
+        odometry_line_set.colors = o3d.utility.Vector3dVector(colors)  # line colors, not point colors
+
         self.widget3d.scene.add_geometry("trajectory", odometry_line_set, self.lit)
 
 
@@ -233,27 +240,37 @@ class Viewer:
 
 
 
+    def update_background(self):
+        (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
+        print(f"\ncurrent view info:")
+        print(f"\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}")
+        print(f"\tW2C:\n{W2C}")
+        # ## compute_Gaussian_background here:
+        self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
+        
 
     def _update_thread(self):
+
+        # create glfw context at update thread
+        # WIDTH, HEIGHT = self.WIDTH, self.HEIGHT
+        # self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
+        # self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
+        # glfw.make_context_current(self.window_gl)
+
         # This is NOT the UI thread, need to call post_to_main_thread() to update
         # the scene or any part of the UI.
         while True:
             time.sleep(0.01)
             if self.is_done:
                 o3d.visualization.gui.Application.instance.quit()
+                time.sleep(0.01)
+                break
 
-            # get current camera view
-            (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
-            # ## compute_Gaussian_background here:
-            self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
-
-            print(f"\ncurrent view info:")
-            print(f"\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}")
-            print(f"\tW2C:\n{W2C}")
+            self.update_background()
 
             # Update the images. This must be done on the UI thread.
             def update():
-                self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)
+                self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)                
                 time.sleep(0.01)
                 self.save_figure()
 
@@ -283,7 +300,7 @@ class Viewer:
         return frustum
 
 
-    def create_trajectory_lineset(self, viewpoint_stack, color=[0, 0, 1]):
+    def create_trajectory_lineset(self, viewpoint_stack):
         camera_centers = []
         for viewpoint in viewpoint_stack:
             camera_centers.append ( viewpoint.camera_center.detach().cpu().numpy() )
@@ -292,15 +309,8 @@ class Viewer:
         lines = []
         for i in range(len(camera_centers)-1):
             lines.append( [i, i+1] )
-
-        colors = [color for i in range(len(lines))]
-
-        odometry_line_set = o3d.geometry.LineSet()
-        odometry_line_set.points = o3d.utility.Vector3dVector(points)
-        odometry_line_set.lines = o3d.utility.Vector2iVector(lines)
-        odometry_line_set.colors = o3d.utility.Vector3dVector(colors)
         
-        return odometry_line_set
+        return (points, lines)
 
     @staticmethod
     def vfov_to_hfov(vfov_deg, height, width):
@@ -328,12 +338,10 @@ class Viewer:
 
 
 
-    def render_o3d_image(self, W2C, FoVy, H, W):
+    def render_o3d_image(self, W2C, FoVy, HEIGHT, WIDTH):
 
-        WIDTH, HEIGHT = W, H
         self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
         self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
-        # glfw.make_context_current(self.window_gl)
         
         glfw.poll_events()
         gl.glClearColor(0, 0, 0, 1.0)
