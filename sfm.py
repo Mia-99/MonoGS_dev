@@ -476,6 +476,7 @@ class SFM(mp.Process):
             self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
             self.gui_process.join()
             sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
+        time.sleep(0.01)
     
 
 

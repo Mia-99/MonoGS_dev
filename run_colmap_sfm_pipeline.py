@@ -155,7 +155,7 @@ if __name__ == "__main__":
     '''
 
 
-    use_pcd_from_depth_prediction = False
+    # use_pcd_from_depth_prediction = False
 
 
     # perform colmap reconstruction
@@ -164,7 +164,10 @@ if __name__ == "__main__":
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
     downsample_scale = 2**2
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
-        
+    
+    for cam in viewpoint_stack:
+        print(f"cam.uid = {cam.uid}")
+
     print(f"scale_info = {scale_info}")
     cameras_extent = scale_info["radius"]
 
@@ -178,18 +181,21 @@ if __name__ == "__main__":
     gaussians.training_setup(opt)
 
 
+    for cam in viewpoint_stack:
+        print(f"cam.uid = {cam.uid}")
+
 
     print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
     ## visualization
-    use_gui = True
+    use_gui = False
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.optimize()
     sfm.close()
 
-    sfm.show_rendered_images()
+    # sfm.show_rendered_images()
     
 
 
@@ -227,6 +233,6 @@ if __name__ == "__main__":
     #     sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
     
 
-    # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
+    Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
 
 
