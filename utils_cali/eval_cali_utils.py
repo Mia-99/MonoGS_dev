@@ -31,12 +31,13 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ## Plot
     traj_ref = PosePath3D(poses_se3=poses_gt)
     traj_est = PosePath3D(poses_se3=poses_est)
-    # traj_est_aligned = copy.deepcopy(traj_est)
-    # traj_est_aligned.align(traj_ref, correct_scale=monocular)
+
+    traj_est_aligned = copy.deepcopy(traj_est)
+    traj_est_aligned.align(traj_ref, correct_scale=monocular)
     # below old method does not work anymore
-    traj_est_aligned = trajectory.align_trajectory(
-        traj_est, traj_ref, correct_scale=monocular
-    )
+    # traj_est_aligned = trajectory.align_trajectory(
+    #     traj_est, traj_ref, correct_scale=monocular
+    # )
 
     ## RMSE
     pose_relation = metrics.PoseRelation.translation_part
@@ -100,8 +101,8 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
 
     def gen_pose_matrix(R, T):
         pose = np.eye(4)
-        pose[0:3, 0:3] = R.cpu().numpy()
-        pose[0:3, 3] = T.cpu().numpy()
+        pose[0:3, 0:3] = R.cpu().numpy() if isinstance(R, torch.Tensor) else R
+        pose[0:3, 3] = T.cpu().numpy() if isinstance(R, torch.Tensor) else T
         return pose
 
     for kf_id in kf_ids:
@@ -136,7 +137,7 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
         label=label_evo,
         monocular=monocular,
     )
-    wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
+    # wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
     return ate
 
 def eval_rendering(

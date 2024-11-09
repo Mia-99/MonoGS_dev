@@ -17,6 +17,7 @@ from utils.slam_utils import get_loss_tracking, get_median_depth
 from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 
 from gaussian_scale_space import image_conv_gaussian_separable
+import copy
 import rich
 
 
@@ -316,7 +317,9 @@ class FrontEnd(mp.Process):
         keyframes = data[3]
         self.occ_aware_visibility = occ_aware_visibility
 
-        for kf_id, kf_R, kf_T, kf_fx, kf_fy, kf_kappa in keyframes:
+        for kf_id, kf_R, kf_T, kf_calib in keyframes:
+            calib = copy.deepcopy(kf_calib)
+            kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
             self.cameras[kf_id].update_RT(kf_R.clone(), kf_T.clone())
             self.cameras[kf_id].update_calibration(kf_fx, kf_fy, kf_kappa)
 
@@ -475,9 +478,9 @@ class FrontEnd(mp.Process):
 
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
-                if self.require_calibration and self.initialized and self.signal_calibration_change:
-                    self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, continue_optimize=True) # render again with the best parameters
+                # if self.require_calibration and self.initialized and self.signal_calibration_change:
+                #     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
+                #     render_pkg = self.tracking(cur_frame_idx, viewpoint, continue_optimize=True) # render again with the best parameters
     
 
                 current_window_dict = {}
@@ -682,11 +685,11 @@ class FrontEnd(mp.Process):
         if len(self.current_window):
             last_keyframe_idx = self.current_window[0]
             last_keyframe = self.cameras[last_keyframe_idx] # last keyframe (optimzied by backend)
-            last_frame = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
-            if (last_keyframe.calibration_identifier == last_frame.calibration_identifier):
-                last_frame.update_calibration (last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa)
-
-
+            # last_frame = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
+            for frame_idx in range(last_keyframe_idx+self.use_every_n_frames, cur_frame_idx, self.use_every_n_frames):
+                frame = self.cameras[frame_idx]
+                if (frame.calibration_identifier == last_keyframe.calibration_identifier):
+                    frame.update_calibration (last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa)
     
 
 

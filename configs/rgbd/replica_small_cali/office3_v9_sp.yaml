@@ -1,9 +1,9 @@
-inherit_from: "configs/mono/replica_small_cali/base_config.yaml"
+inherit_from: "configs/rgbd/replica_small_cali/base_config.yaml"
 Dataset:
-  dataset_path: "/datasets/replica_small_cali/office0_v6"
+  dataset_path: "/datasets/replica_small_cali/office3_v9"
   intrinsic_filename: "intrinsics.txt"
   type: 'replica'
-  single_thread: False
+  single_thread: True
   Calibration:
     fx: 500.0
     fy: 500.0
@@ -20,9 +20,4 @@ Dataset:
     distorted: False
   grad_mask_row: 32
   grad_mask_col: 32
-  use_gt_pose: False
-
-
-
-
 

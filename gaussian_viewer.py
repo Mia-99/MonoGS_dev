@@ -1,13 +1,12 @@
 
 # https://github.com/isl-org/Open3D/blob/73508bcaba0a9a31e398bf8de76e3bbeaed81540/examples/python/visualization/video.py
+import pickle
 import numpy as np
 import open3d as o3d
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 import time
 import threading
-import pickle
-
 
 import os
 
@@ -63,12 +62,31 @@ def create_gaussians_gl (gaussians):
 
 
 class Viewer:
+    '''
+        -- Mouse view control --
+        Left button + drag         : Rotate.
+        Ctrl + left button + drag  : Translate.
+        Wheel button + drag        : Translate.
+        Shift + left button + drag : Roll.
+        Wheel                      : Zoom in/out.
 
-    def __init__(self, viewpoint_stack = None, gaussians_gl = None):
+        -- Keyboard view control --
+        [/]          : Increase/decrease field of view.
+        R            : Reset view point.
+        Ctrl/Cmd + C : Copy current view status into the clipboard.
+        Ctrl/Cmd + V : Paste view status from clipboard.
+
+        -- General control --
+        Q, Esc       : Exit window.
+        H            : Print help message.
+        P, PrtScn    : Take a screen capture.
+        D            : Take a depth capture.
+        O            : Take a capture of current rendering settings.   
+    '''
+    def __init__(self, viewpoint_stack = None, gaussians_gl = None, pose_vis_opts = 2):        
 
         app = o3d.visualization.gui.Application.instance
         app.initialize()
-
 
         self.viewpoint_stack = viewpoint_stack
         self.gaussians_gl = gaussians_gl
@@ -83,10 +101,10 @@ class Viewer:
 
         self.WIDTH, self.HEIGHT = 600, 400
 
-        self.window = gui.Application.instance.create_window ( "Press S/s key to save figure", width=self.WIDTH, height=self.HEIGHT )
+        self.window = gui.Application.instance.create_window ( "viewer: figure saved automatically", width=self.WIDTH, height=self.HEIGHT )
         self.window.set_on_layout(self._on_layout)
         self.window.set_on_close(self._on_close)
-        self.window.set_on_key(self._on_key)
+        # self.window.set_on_key(self._on_key)
 
         self.widget3d = gui.SceneWidget()
         self.widget3d.scene = rendering.Open3DScene(self.window.renderer)
@@ -95,7 +113,19 @@ class Viewer:
         self.lit = rendering.MaterialRecord()
         self.lit.shader = "defaultLit"
 
-        self.plot_trajectory()
+
+        '''
+            plot cameras a view furstums               
+        '''
+        if pose_vis_opts & 1:
+            self.plot_trajectory(self.viewpoint_stack)
+
+        '''
+            plot the trajectory of camera centers               
+        '''
+        if pose_vis_opts & 2:
+            self.plot_cameras(self.viewpoint_stack)
+
 
         bounds = self.widget3d.scene.bounding_box
         self.widget3d.setup_camera(45.0, bounds, bounds.get_center())
@@ -108,17 +138,45 @@ class Viewer:
         For visualize 3DGS ellipsoids
         """
         self.g_camera = util.Camera(h=self.HEIGHT, w=self.WIDTH)
-        self.window_gl = self.init_glfw(self.WIDTH, self.HEIGHT)
-        self.g_renderer = render_ogl.OpenGLRenderer(self.g_camera.w, self.g_camera.h)
+        self.window_gl = None
+        self.g_renderer = None
 
         gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glDepthFunc(gl.GL_LEQUAL)
 
-        self.render_img = self.render_o3d_image()
-        self.widget3d.scene.set_background([1, 1, 1, 1], self.render_img)
 
+        # get current camera view
+        (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
 
+        # W2C = np.array(
+        #                 [[-9.43868041e-01,  2.80348748e-01,  1.74693331e-01, -1.74692627e-02],
+        #                 [-2.82218784e-01, -9.59239423e-01,  1.45645794e-02, -1.45645207e-03],
+        #                 [ 1.71655729e-01, -3.55546921e-02,  9.84515131e-01,  5.70783520e+00],
+        #                 [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  1.00000000e+00]]
+        # )
+        # W = 600
+        # H = 400
+        # FoVy = 0.7853981633974483
+
+        W2C = np.array(
+                        [[1,  0,  0, 0],
+                        [0, 1,  0, 0],
+                        [ 0, 0,  1,  13],
+                        [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  1.00000000e+00]]
+        )
+
+        # set the camera view-control in case the view is user defined
+        C2W = np.linalg.inv(W2C)
+        frustum = create_frustum( C2W )
+        viewpoint = frustum.view_dir
+        self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
+
+        self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
+        self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)
+        self.save_figure()
+
+        # a thread that helps to update view-control
         self.is_done = False
         threading.Thread(target=self._update_thread).start()
 
@@ -142,14 +200,26 @@ class Viewer:
         return window
 
 
-    def plot_trajectory(self):
-        if (self.viewpoint_stack is None):
+    def plot_cameras(self, viewpoint_stack = None, color = [0, 1, 0], camera_size=0.1):
+        if (viewpoint_stack is None):
             return
-        for camera in self.viewpoint_stack:
+        for camera in viewpoint_stack:
             name = "cam{}_".format(camera.uid)
-            self.add_camera(camera, name, color=[0, 1, 0], size=self.camera_size)
+            self.add_camera(camera, name, color=color, size=camera_size)
 
-        odometry_line_set = self.create_trajectory_lineset(color=[0, 0, 1])
+
+    def plot_trajectory(self, viewpoint_stack = None, colors = None):
+        if (viewpoint_stack is None):
+            return        
+        (points, lines) = self.create_trajectory_lineset(viewpoint_stack)
+        if colors is None:
+            colors = [ [0, 0, 1]  for i in range(len(lines))]
+
+        odometry_line_set = o3d.geometry.LineSet()
+        odometry_line_set.points = o3d.utility.Vector3dVector(points)
+        odometry_line_set.lines = o3d.utility.Vector2iVector(lines)
+        odometry_line_set.colors = o3d.utility.Vector3dVector(colors)  # line colors, not point colors
+
         self.widget3d.scene.add_geometry("trajectory", odometry_line_set, self.lit)
 
 
@@ -165,39 +235,57 @@ class Viewer:
 
 
     def _on_close(self):
-        self.is_done = True        
+        self.is_done = True       
         return True  # False would cancel the close
     
 
-    def _on_key(self, e):
-        if e.key == gui.KeyName.S or e.key == gui.KeyName.s:
-            self.save_figure()
-        return True
+    # def _on_key(self, e):
+    #     if e.key == gui.KeyName.S or e.key == gui.KeyName.s:
+    #         self.save_figure()
+    #     return True
 
 
 
+    def update_background(self):
+        (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
+        print(f"\ncurrent view info:")
+        print(f"\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}")
+        print(f"\tW2C:\n{W2C}")
+        # ## compute_Gaussian_background here:
+        self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
+        
 
     def _update_thread(self):
+
+        # create glfw context at update thread
+        # WIDTH, HEIGHT = self.WIDTH, self.HEIGHT
+        # self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
+        # self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
+        # glfw.make_context_current(self.window_gl)
+
         # This is NOT the UI thread, need to call post_to_main_thread() to update
         # the scene or any part of the UI.
-        while not self.is_done:
-            # ## compute_Gaussian_background here:            
-            self.render_img = self.render_o3d_image()
+        while True:
+            time.sleep(0.01)
+            if self.is_done:
+                o3d.visualization.gui.Application.instance.quit()
+                time.sleep(0.01)
+                break
+
+            self.update_background()
+
             # Update the images. This must be done on the UI thread.
             def update():
-                self.widget3d.scene.set_background([1, 1, 1, 1], self.render_img)
+                self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)                
                 time.sleep(0.01)
+                self.save_figure()
 
-            if not self.is_done:
-                gui.Application.instance.post_to_main_thread(
-                    self.window, update)
-                
-        o3d.visualization.gui.Application.instance.quit()
+            gui.Application.instance.post_to_main_thread(self.window, update)
+                        
 
 
     def save_figure(self):
-        filename = "viewer_fig_save_replica"
-        # filename = "viewer_fig_save"
+        filename = "viewer_fig_automatic_save"
         height = self.window.size.height
         width = self.window.size.width
         app = o3d.visualization.gui.Application.instance
@@ -218,24 +306,17 @@ class Viewer:
         return frustum
 
 
-    def create_trajectory_lineset(self, color=[0, 0, 1]):
+    def create_trajectory_lineset(self, viewpoint_stack):
         camera_centers = []
-        for viewpoint in self.viewpoint_stack:
+        for viewpoint in viewpoint_stack:
             camera_centers.append ( viewpoint.camera_center.detach().cpu().numpy() )
         points = np.array( camera_centers )
 
         lines = []
         for i in range(len(camera_centers)-1):
             lines.append( [i, i+1] )
-
-        colors = [color for i in range(len(lines))]
-
-        odometry_line_set = o3d.geometry.LineSet()
-        odometry_line_set.points = o3d.utility.Vector3dVector(points)
-        odometry_line_set.lines = o3d.utility.Vector2iVector(lines)
-        odometry_line_set.colors = o3d.utility.Vector3dVector(colors)
         
-        return odometry_line_set
+        return (points, lines)
 
     @staticmethod
     def vfov_to_hfov(vfov_deg, height, width):
@@ -257,21 +338,16 @@ class Viewer:
         fy = fov2focal(FoVy, image_gui.shape[1])
         cx = image_gui.shape[2] // 2
         cy = image_gui.shape[1] // 2
-        T = torch.from_numpy(w2c)
         H=image_gui.shape[1]
         W=image_gui.shape[2]
-        return (T, FoVx, FoVy, fx, fy, cx, cy, H, W)
+        return (w2c, FoVx, FoVy, fx, fy, cx, cy, H, W)
 
 
 
-    def render_o3d_image(self):
+    def render_o3d_image(self, W2C, FoVy, HEIGHT, WIDTH):
 
-        (T, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
-
-        WIDTH, HEIGHT = self.g_camera.w, self.g_camera.h
         self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
         self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
-        # glfw.make_context_current(self.window_gl)
         
         glfw.poll_events()
         gl.glClearColor(0, 0, 0, 1.0)
@@ -281,15 +357,17 @@ class Viewer:
             | gl.GL_STENCIL_BUFFER_BIT
         )
 
-        w = int(self.window.size.width * self.widget3d_width_ratio)
-        glfw.set_window_size(self.window_gl, w, self.window.size.height)
-        self.g_camera.fovy = FoVy
-        self.g_camera.update_resolution(self.window.size.height, w)
-        self.g_renderer.set_render_reso(w, self.window.size.height)
-        frustum = create_frustum(
-            np.linalg.inv(cv_gl @ self.widget3d.scene.camera.get_view_matrix())
-        )
+        w = int(WIDTH * self.widget3d_width_ratio)
+        glfw.set_window_size(self.window_gl, w, HEIGHT)
 
+        C2W = np.linalg.inv(W2C)
+        frustum = create_frustum( C2W )
+        # viewpoint = frustum.view_dir
+        # self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
+
+        self.g_camera.fovy = FoVy
+        self.g_camera.update_resolution(HEIGHT, w)
+        self.g_renderer.set_render_reso(w, HEIGHT)
         self.g_camera.position = frustum.eye.astype(np.float32)
         self.g_camera.target = frustum.center.astype(np.float32)
         self.g_camera.up = frustum.up.astype(np.float32)
@@ -355,6 +433,7 @@ def read_camera_json (json_file_path):
 
     return cam_infos
 
+
 def load_replica_poses(path):
         cam_infos = []
         with open(path, "r") as f:
@@ -409,30 +488,22 @@ def gaussian_model_to_gaussian_data(gaussian_model):
     # exit()  
     return util_gau.GaussianData(xyz, rot, scale, opacity, shs)
 
-
 def main():
-
-    # camera_file_path = "/hdd/3DGS/bicycle/cameras.json"
-    # point_cloud_file_path = "/hdd/3DGS/bicycle/point_cloud/iteration_7000/point_cloud.ply"
-    # cam_infos = read_camera_json (camera_file_path)
-    # gaussians_gl = util_gau.load_ply(point_cloud_file_path)
 
     camera_traj_path = "/datasets/replica_small/office0/traj.txt"
     # gaussians_path = "./results/monocular/replica_small_cali/office0_v0/2024-10-21-09-48-50/point_cloud/final/point_cloud.ply"
     # gaussians_gl = util_gau.load_ply(gaussians_path)
-    gaussians_path = "./results/monocular/replica_small_cali/office0_v0/2024-10-21-09-48-50/gs/instance.pkl"
-
+    gaussians_path = "/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-07-22-15-28/gs/instance.pkl"
 
     cam_infos = load_replica_poses (camera_traj_path)
     with open(gaussians_path, "rb") as f:
         gaussians = pickle.load(f)
     # print(gaussians)
     gaussians_gl = gaussian_model_to_gaussian_data(gaussians)
-
+    # image rendering
     Fig = Viewer(viewpoint_stack=cam_infos,  gaussians_gl= gaussians_gl)
-    # Fig = Viewer(viewpoint_stack=cam_infos)
 
 
 if __name__ == "__main__":
     main()
-# press p
+
