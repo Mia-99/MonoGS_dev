@@ -375,7 +375,8 @@ class Results():
                     data = experiment.load_data()
                     self.data[img_type][seq][sub_seq][time] = data
                     if gaussians is not None:
-                        experiment.render()
+                        # experiment.render()
+                        pass
     
     def tracking_latex_table(self):
         tables = {}
@@ -475,7 +476,7 @@ class Results():
                         lr.add(data['be_focal_lr'])
 
                         rendering_line = f" & {data['after_opt_mean_psnr']:.2f} & {data['after_opt_mean_ssim']:.2f} & {data['after_opt_mean_lpips']:.3f}"
-                        latex_code += type + " & " + method + " & " + sub_seq.replace('_', '-') + f" {data['be_focal_lr']}" + rendering_line + "\\\\\n"
+                        latex_code += type + " & " + method + " & " + sub_seq.replace('_', '-') + f" {data['be_focal_lr']}" + f" {data['calib_opts_require_calibration']}" + rendering_line + "\\\\\n"
 
 
                 latex_code += "\\hline\n"
@@ -561,9 +562,9 @@ if __name__ == "__main__":
     sequence = ['o0','o1', 'o2','o3','o4']
     # sequence = ['o0']
     results = Results(datasets, img_types, sequence)
-    # tables = results.tracking_latex_table()
+    tables = results.tracking_latex_table()
     # tables = results.rendering_latex_table()
-    tables = results.total_latex_table()
+    # tables = results.total_latex_table()
     # a = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office0/2024-10-24-10-04-59')
     # a = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-05-05-43-24')
     # a.render()
