@@ -26,7 +26,13 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from gaussian_splatting.utils.image_utils import psnr
 from gaussian_splatting.utils.loss_utils import ssim
 
-
+from evo.core import metrics, trajectory
+from evo.tools import plot
+from evo.core.trajectory import PosePath3D
+from evo.tools.plot import PlotMode
+from evo.tools.settings import SETTINGS
+import copy
+import open3d as o3d
 # results_data = {
 #     'monocular': {
 #         'office2': {
@@ -117,12 +123,14 @@ class Experiment():
         self.before_opt_psnr_json_file_path = os.path.join(path, 'psnr', 'before_opt', 'final_result.json')
         self.after_opt_psnr_json_file_path = os.path.join(path, 'psnr', 'after_opt', 'final_result.json')
         self.yaml_file_path = os.path.join(path, 'config.yml')
+        self.cali_result_json_file_path = os.path.join(path, 'cali', 'final_result.json')
 
         self.final_stats_json_data = read_json_file(self.final_stats_json_file_path)
         self.trj_final_json_data = read_json_file(self.trj_final_json_file_path)
         self.before_opt_psnr_json_data = read_json_file(self.before_opt_psnr_json_file_path)
         self.after_opt_psnr_json_data = read_json_file(self.after_opt_psnr_json_file_path)
         self.yaml_data = read_yaml_file(self.yaml_file_path)
+        self.cali_result_json_data = read_json_file(self.cali_result_json_file_path)
     
     def iscompleted(self):
         return all([
@@ -130,7 +138,8 @@ class Experiment():
             self.trj_final_json_data is not None,
             self.before_opt_psnr_json_data is not None,
             self.after_opt_psnr_json_data is not None,
-            self.yaml_data is not None
+            self.yaml_data is not None,
+            self.cali_result_json_data is not None
         ])
     
     def load_data(self):
@@ -157,6 +166,7 @@ class Experiment():
         after_mapping_itr_num = self.yaml_data.get('Training').get('after_mapping_itr_num', 'None')
         be_focal_lr = self.yaml_data.get('Training').get('be_focal_lr', 'None')
         be_focal_lr_cnt_s2 = self.yaml_data.get('Training').get('be_focal_lr_cnt_s2', 'None')
+        afle = self.cali_result_json_data.get('AFLE', 'None')
 
         data = {
             'result_path': self.path,
@@ -169,6 +179,7 @@ class Experiment():
             # 'kf_min_translation': kf_min_translation,
             'max': max_ate,
             'rmse': rmse,
+            "afle": afle,
             'after_opt_mean_psnr': aft_opt_mean_psnr,
             'after_opt_mean_ssim': aft_opt_mean_ssim,
             'after_opt_mean_lpips': aft_opt_mean_lpips,
@@ -180,6 +191,37 @@ class Experiment():
             'calib_opts_allow_lens_distortion': calib_opts_allow_lens_distortion
         }
         return data
+
+    def load_ply(self):
+        self.ply_path = os.path.join(self.path, 'point_cloud', 'final', 'point_cloud.ply')
+        self.ply_path = '/datasets/office1_mesh.ply'
+
+        self.pcd = o3d.io.read_point_cloud(self.ply_path)
+        pass
+    def load_gt_ply(self):
+        self.gt_ply_path = '/datasets/office1_mesh.ply'
+        self.gt_pcd = o3d.io.read_point_cloud(self.ply_path)
+        pass
+
+    def compare_ply(self):
+        # Debug
+        self.load_ply()
+        self.load_gt_ply()
+        # downsample
+        self.pcd_down = self.pcd.voxel_down_sample(voxel_size=0.05)
+        self.gt_pcd_down = self.gt_pcd.voxel_down_sample(voxel_size=0.05)
+        # compareing the two point clouds fitness
+        threshold = 30  # Max distance for correspondence points (adjust as needed)
+        icp_result = o3d.pipelines.registration.registration_icp(
+            self.pcd_down, self.gt_pcd_down, threshold,
+            np.eye(4),  # Initial alignment estimate
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+            o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=2000)
+        )
+        print(icp_result)
+        # Output the alignment results: fitness and inlier RMSE
+        print(f"Fitness score: {icp_result.fitness}")  # Fraction of matching points
+        print(f"Inlier RMSE: {icp_result.inlier_rmse}")
 
     def load_model(self):
         self.gaussians = load_gs_model(os.path.join(self.path, 'gs', 'instance.pkl'))
@@ -197,15 +239,19 @@ class Experiment():
         print(np_trj_est.shape)
         assert len(self.trj_id) == len(np_trj_est) == len(np_trj_gt)
         # list to tensor
-        self.trj_est = []
-        self.trj_gt = []
+        self.trj_est_torch = []
+        self.trj_est_np = []
+        self.trj_gt_torch = []
+        self.trj_gt_np = []
         for i in range(len(self.trj_id)):
             T = np_trj_est[i, :, :]
             cam_pose_est = np.linalg.inv(T)
-            self.trj_est.append(torch.tensor(cam_pose_est, device="cuda"))
+            self.trj_est_np.append(T)
+            self.trj_est_torch.append(torch.tensor(cam_pose_est, device="cuda"))
             T = np_trj_gt[i, :, :]
             cam_pose_gt = np.linalg.inv(T)
-            self.trj_gt.append(torch.tensor(cam_pose_gt, device="cuda"))
+            self.trj_gt_np.append(T)
+            self.trj_gt_torch.append(torch.tensor(cam_pose_gt, device="cuda"))
         return True
 
     def load_config(self):
@@ -221,6 +267,7 @@ class Experiment():
         self.dataset = load_dataset(model_params, model_params.source_path, config=self.config)
         bg_color = [0, 0, 0]
         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+        self.mono =  True if self.yaml_data['Dataset']['sensor_type'] == 'monocular' else False
 
     def load_focal(self):
         focal = read_json_file(os.path.join(self.path, 'cali', 'final_result.json'))
@@ -230,6 +277,8 @@ class Experiment():
         self.focal_gt = focal['focal_gt']
         self.kappa_est = focal['kappa_est']
         self.kappa_gt = focal['kappa_gt']
+        self.focal_error_percentage = focal['focal_percentage']
+        self.focal_error_percentage = 100 * np.array(self.focal_error_percentage)
         return True
                               
     def render(self):
@@ -253,8 +302,8 @@ class Experiment():
                     viewpoint = Camera.init_from_dataset(self.dataset, idx)
                     viewpoint.compute_grad_mask(self.config)
 
-                    viewpoint.R = self.trj_est[i][:3, :3]
-                    viewpoint.T = self.trj_est[i][:3, 3]
+                    viewpoint.R = self.trj_est_torch[i][:3, :3]
+                    viewpoint.T = self.trj_est_torch[i][:3, 3]
                     viewpoint.fx = self.focal_est[i]
                     viewpoint.fy = self.focal_est[i]
                     viewpoint.kappa = self.kappa_est[i]
@@ -313,7 +362,42 @@ class Experiment():
                         'lpips_array': lpips_array
                     }, file)
                 return rendering
+    
+    def pre_plot(self):
+        self.load_config()
+        self.load_pose()
+        self.load_model()
+        self.load_focal()
 
+        if self.load_pose() and self.load_model() and self.load_focal():
+            dir = os.path.join(self.path, 'cali')
+            self.traj_ref = PosePath3D(poses_se3=self.trj_gt_np)
+            self.traj_est = PosePath3D(poses_se3=self.trj_est_np)
+            self.traj_est_aligned = copy.deepcopy(self.traj_est)
+            self.traj_est_aligned.align(self.traj_ref, self.mono)
+            return True
+
+    def plot(self):
+        if self.pre_plot():
+            # plot the trajectory with focal length error bar
+            dir = os.path.join(self.path, 'cali')
+            plot_mode = PlotMode.xy
+            fig = plt.figure()
+            ax = plot.prepare_axis(fig, plot_mode)
+            ax.set_title(f"Focal length error (%)")
+            plot.traj(ax, plot_mode, self.traj_ref, "--", "grey", "gt")
+            plot.traj_colormap(
+                ax,
+                self.traj_est_aligned,
+                self.focal_error_percentage,
+                plot_mode,
+                min_map=min(self.focal_error_percentage),
+                max_map=max(self.focal_error_percentage),
+            )
+            # plt.show()
+            plt.savefig(os.path.join(dir, "traj_focal_error.png"), dpi=90)
+
+        pass
      
 
 class Results():
@@ -375,7 +459,8 @@ class Results():
                     data = experiment.load_data()
                     self.data[img_type][seq][sub_seq][time] = data
                     if gaussians is not None:
-                        # experiment.render()
+                        experiment.render()
+                        # experiment.plot()
                         pass
     
     def tracking_latex_table(self):
@@ -505,11 +590,11 @@ class Results():
 
                 latex_code = "\\begin{table}[ht]\n"
                 latex_code += "\\centering\n"
-                latex_code += "\\begin{tabular}{|" + "c|"*(7) + "}\n"
+                latex_code += "\\begin{tabular}{|" + "c|"*(8) + "}\n"
 
                 latex_code += "\\hline\n"
                 # latex_code += seq_line + "\\\\\n"
-                latex_code += "Types & Seq & Methods & RMSE[cm] & PSNR[db]$\\uparrow$ & SSIM$\\uparrow$ & LPIPS$\\downarrow$ \\\\\n"
+                latex_code += "Types & Seq & Methods & RMSE[cm] & AFEL & PSNR[db]$\\uparrow$ & SSIM$\\uparrow$ & LPIPS$\\downarrow$ \\\\\n"
 
                 for sub_seq in sorted_sub_seqs:
                     for time, data in sub_seqs[sub_seq].items():
@@ -521,7 +606,7 @@ class Results():
                         else:
                             method = 'CaliGS-SLAM'
                         lr.add(data['be_focal_lr'])
-                        total_line =  f" & {100*data['rmse']:.2f}" + f" & {data['after_opt_mean_psnr']:.2f} & {data['after_opt_mean_ssim']:.2f} & {data['after_opt_mean_lpips']:.3f}"
+                        total_line =  f" & {100*data['rmse']:.3f}" + f" & {data['afle']:.3f}" + f" & {data['after_opt_mean_psnr']:.4f} & {data['after_opt_mean_ssim']:.4f} & {data['after_opt_mean_lpips']:.4f}"
                         # latex_code += type + " & " + method + " & " + sub_seq.replace('_', '-') + f" {data['be_focal_lr']}" + rendering_line + "\\\\\n"
                         latex_code += type + " & " + method + " & " + sub_seq.replace('_', '-') + f" {data['be_focal_lr']}" + f" {data['calib_opts_require_calibration']}" + total_line + "\\\\\n"
 
@@ -549,7 +634,33 @@ class Results():
     def plot_gs(self):
         pass
 
-
+def plot_traj_focal(ours, ours_no_cali, gt):
+    plot_mode = PlotMode.xy
+    fig = plt.figure()
+    ax = plot.prepare_axis(fig, plot_mode)
+    ax.set_title(f"Focal length error (%)")
+    plot.traj(ax, plot_mode, gt.traj_ref, "--", "grey", "gt")
+    # plot.traj(ax, plot_mode, gsslam.traj_est_aligned, "--", "r", "gt")
+    min_map = min(ours.focal_error_percentage, ours_no_cali.focal_error_percentage)
+    max_map = max(ours.focal_error_percentage, ours_no_cali.focal_error_percentage)
+    plot.traj_colormap(
+        ax,
+        ours.traj_est_aligned,
+        ours.focal_error_percentage,
+        plot_mode,
+        min_map=min_map,
+        max_map=max_map,
+    )
+    plot.traj_colormap(
+        ax,
+        ours_no_cali.traj_est_aligned,
+        ours_no_cali.focal_error_percentage,
+        plot_mode,
+        min_map=min_map,
+        max_map=min_map,
+    )
+    # plt.show()
+    plt.savefig(os.path.join("traj_focal_error.png"), dpi=90)
 
 if __name__ == "__main__":
     img_types = ['mono', 'rgbd']
@@ -557,16 +668,31 @@ if __name__ == "__main__":
     # sequence = ['o0','o1', 'o2','o3','o4']
 
 
-    # img_types = ['rgbd']
-    # datasets = ['replica_small_cali']
+    # img_types = ['mono']
+    datasets = ['replica_small']
     sequence = ['o0','o1', 'o2','o3','o4']
-    # sequence = ['o0']
-    results = Results(datasets, img_types, sequence)
-    tables = results.tracking_latex_table()
+    # sequence = ['o3']
+    # results = Results(datasets, img_types, sequence)
+    # tables = results.tracking_latex_table()
     # tables = results.rendering_latex_table()
     # tables = results.total_latex_table()
     # a = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office0/2024-10-24-10-04-59')
-    # a = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-05-05-43-24')
-    # a.render()
+    # a = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office3/2024-11-09-22-26-48')
+    # # a.render()
+    # a.plot()
+
+    # gsslam = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office0/2024-11-08-18-38-01')
+    # ours_no_cali = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-07-22-15-28')
+    # ours.pre_plot()
+    # gsslam.pre_plot()
+    # ours = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-09-11-57-25')
+    ours = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office1_1000/2024-11-09-21-01-20')
+    ours.compare_ply()
+    # ours.pre_plot()
+    # plot_traj_focal(ours, ours_no_cali, gsslam)
+    
+
+
+
     
     pass

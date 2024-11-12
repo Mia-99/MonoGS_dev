@@ -17,6 +17,7 @@ Dataset:
     depth_scale: 5000.0
     distorted: True
   add_perterbation: True
+  focal_perturbation: 0.2
 
 
 
