@@ -1,0 +1,24 @@
+inherit_from: "configs/mono/replica_small/base_config.yaml"
+Dataset:
+  dataset_path: "/datasets/replica_small/office0_300400_1_350"
+  intrinsic_filename: "intrinsics.txt"
+  type: 'replica'
+  single_thread: False
+  Calibration:
+    fx: 350.0
+    fy: 350.0
+    cx: 199.5
+    cy: 149.5
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0
+    width: 400
+    height: 300
+    depth_scale: 6553.5
+    distorted: False
+  grad_mask_row: 32
+  grad_mask_col: 32
+
+
