@@ -32,7 +32,16 @@ from colmap import assemble_3DGS_cameras
 
 from gaussian_viewer import Viewer, create_gaussians_gl
 
+from gaussian_splatting.gaussian_renderer import render
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from gaussian_splatting.utils.image_utils import psnr
+from gaussian_splatting.utils.loss_utils import ssim
+from gaussian_splatting.utils.system_utils import mkdir_p
+import cv2
+import json
+from datetime import datetime
 
+from utils_cali.eval_cali_utils import eval_ate
 # from depth_anything import DepthAnything
 # def init_dense_pcd_from_network (viewpoint_stack, reconstruction: ColMap, num_points = 20000):
 
@@ -78,8 +87,190 @@ from gaussian_viewer import Viewer, create_gaussians_gl
 
 #     return positions, colors
 
+def load_gt(directory):
+    camera_files = [f for f in os.listdir(directory) if f.endswith('.camera')]
+    camera_files.sort()  # Ensure numerical order
+    all_camera_params = []  # List to store all camera parameters
+    fxs = []
+    fys = []
+    R_gts = []
+    T_gts = []
+
+    for filename in camera_files:
+        filepath = os.path.join(directory, filename)
+        with open(filepath, 'r') as file:
+            lines = file.readlines()
+
+            # Parsing intrinsic matrix
+            intrinsic = np.array([list(map(float, lines[i].strip().split())) for i in range(3)])
+            fx = intrinsic[0, 0]
+            fxs.append(fx)
+            fy = intrinsic[1, 1]
+            fys.append(fy)
+
+            # Parsing extrinsic parameters (rotation matrix and translation vector)
+            rotation = np.array([list(map(float, lines[i].strip().split())) for i in range(4, 7)])
+            translation = np.array(list(map(float, lines[7].strip().split())))
+            # 4x4 eye
+            T = np.eye(4)
+            T[:3, :3] = rotation
+            T[:3, 3] = translation
+            R_gts.append(torch.tensor(rotation, dtype=torch.float32, device=torch.device('cuda')))
+            T_gts.append(torch.tensor(translation, dtype=torch.float32, device=torch.device('cuda')))
+            
+            
+            # Image dimensions
+            dimensions = list(map(int, lines[8].strip().split()))
+
+            # Store in a dictionary
+            camera_params = {
+                'intrinsic': intrinsic,
+                'rotation': rotation,
+                'translation': translation,
+                'dimensions': dimensions
+            }
+            all_camera_params.append(camera_params)
+    
+    return R_gts, T_gts, fxs, fys
+
+def save_rendering(viewpoints, gaussians, kf_indices, pipeline_params, save_path):
+        bg_color = [0, 0, 0]
+        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+        dir = os.path.join(save_path, 'rendering')
+        os.makedirs(os.path.join(dir, 'pred'), exist_ok=True)
+        os.makedirs(os.path.join(dir, 'gt'), exist_ok=True)
+        img_pred, img_gt, saved_frame_idx = [], [], []
+        psnr_array, ssim_array, lpips_array = [], [], []
+        cal_lpips = LearnedPerceptualImagePatchSimilarity(
+            net_type="alex", normalize=True
+        ).to("cuda")
+        
+        for i in range(len(kf_indices)):
+            idx = kf_indices[i]
+            # gt_image format:
+            # torch.Size([3, 600, 800])
+            # torch.float32
+            # cuda:0
+            gt_image = viewpoints[idx].original_image.to("cuda:0")
+            viewpoint = viewpoints[idx]
+            # viewpoint.compute_grad_mask(self.config)
 
 
+            # TODO: add pipeline_params and background
+
+            rendering = render(viewpoint, gaussians, pipeline_params, background)["render"]
+            image = torch.clamp(rendering, 0.0, 1.0)
+            # save image
+            gt = (gt_image.cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
+            gt = cv2.cvtColor(gt, cv2.COLOR_BGR2RGB)
+            pred = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
+            pred = cv2.cvtColor(pred, cv2.COLOR_RGB2BGR)
+
+            # print(gt.shape)  # Should show a tuple of (height, width, channels) for color or (height, width) for grayscale
+            # print(gt.dtype)  # Should typically be 'uint8' for image data
+            # print(os.path.join(dir, f'gt/image_gt_{idx}.png'))
+            cv2.imwrite(os.path.join(dir, f'pred/image_pred_{idx}.png'), pred)
+            state = cv2.imwrite(os.path.join(dir, f'gt/image_gt_{idx}.png'), gt)
+            
+            mask = gt_image > 0
+            psnr_score = psnr((image[mask]).unsqueeze(0), (gt_image[mask]).unsqueeze(0))
+            ssim_score = ssim((image).unsqueeze(0), (gt_image).unsqueeze(0))
+            lpips_score = cal_lpips((image).unsqueeze(0), (gt_image).unsqueeze(0))
+
+            psnr_array.append(psnr_score.item())
+            ssim_array.append(ssim_score.item())
+            lpips_array.append(lpips_score.item())
+            # path/pred/image_pred_{i}.png
+
+        print('mean psnr:', np.mean(psnr_array))
+        print('mean ssim:', np.mean(ssim_array))
+        print('mean lpips:', np.mean(lpips_array))
+        # write mean psnr, ssim, lpips to a file
+        with open(os.path.join(dir, 'psnr_final_result.json'), 'w') as file:
+            json.dump({
+                'mean_psnr': np.mean(psnr_array),
+                'mean_ssim': np.mean(ssim_array),
+                'mean_lpips': np.mean(lpips_array),
+                'psnr_array': psnr_array,
+                'ssim_array': ssim_array,
+                'lpips_array': lpips_array
+            }, file)
+        return rendering
+
+def save_cali(save_dir, frames, kf_indices, N_frames=None):
+    cali_data = dict()
+    cali_id, focal_est, focal_gt = [], [], []
+    kappa_est, kappa_gt = [], []
+    focal_percentage = []
+    # select the calibration id != 0
+    n=0
+    AFLE=0
+
+    print('kf_indices:', kf_indices)
+    
+    for kf_id in kf_indices:
+        kf = frames[kf_id]
+        cali_id.append(frames[kf_id].uid)
+        # cali_id.append(kf_id)
+        
+        #print('kf_id:', kf_id)
+        #print('uid:', frames[kf_id].uid)
+        #print('cali_id:', cali_id)
+        
+        focal_est.append(frames[kf_id].fx)
+        focal_gt.append(frames[kf_id].fx_init)
+        focal_percentage.append( abs(frames[kf_id].fx_init - frames[kf_id].fx) / frames[kf_id].fx_init)
+
+        kappa_est.append(frames[kf_id].kappa)
+        kappa_gt.append(frames[kf_id].kappa_init)
+        if kf.calibration_identifier != 0:
+            n += 1
+            AFLE += abs(frames[kf_id].fx_init - frames[kf_id].fx) 
+            
+    cali_data["AFLE"] = AFLE/n if n != 0 else 0
+    cali_data["cali_id"] = cali_id
+    cali_data["focal_est"] = focal_est
+    cali_data["focal_gt"] = focal_gt
+    cali_data["kappa_est"] = kappa_est
+    cali_data["kappa_gt"] = kappa_gt
+    cali_data["focal_percentage"] = focal_percentage
+
+    cali_dir = os.path.join(save_dir, "cali")
+    plot_dir = os.path.join(save_dir, "cali", "plot")
+    mkdir_p(cali_dir)
+    mkdir_p(plot_dir)
+    json.dump(
+        cali_data,
+        open(os.path.join(cali_dir, "final_result.json"), "w", encoding="utf-8"),
+        indent=4,
+    )
+    plt.figure(figsize=(10, 6))
+    plt.plot(cali_data['cali_id'], cali_data['focal_percentage'], marker='o')
+    plt.title('Focal Percentage vs Frame ID')
+    plt.xlabel('Frame ID')
+    plt.ylabel('Focal Percentage')
+    plt.grid(True)
+    
+    # Save the plot in the plot directory
+    plot_file_path_pdf = os.path.join(plot_dir, 'focal_percentage_vs_cali_id.pdf')
+    plt.savefig(plot_file_path_pdf)
+    plt.close()
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(cali_data['cali_id'], cali_data["focal_gt"], marker='o', label='Focal Ground Truth')
+    plt.plot(cali_data['cali_id'], cali_data["focal_est"], marker='o', label='Focal Estimate')
+    plt.title('Focal vs Frame ID')
+    plt.xlabel('Frame ID')
+    plt.ylabel('Focal')
+    plt.grid(True)
+    # Display the legend
+    plt.legend()
+
+    # Save the plot in the plot directory
+    plot_file_path_pdf = os.path.join(plot_dir, 'focal_vs_cali_id.pdf')
+    plt.savefig(plot_file_path_pdf)
+    plt.close()
+    return AFLE/n if n != 0 else 0
 
 if __name__ == "__main__":
 
@@ -147,7 +338,8 @@ if __name__ == "__main__":
     '''
     
     data_url = "https://cvg-data.inf.ethz.ch/local-feature-evaluation-schoenberger2017/Strecha-Fountain.zip"
-    image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+    image_dir = "/datasets/Strecha-Herzjesu/Herzjesu/images"
+    image_dir = "/datasets/Strecha-Fountain/Fountain/images"
     '''
     ground_truth calibration:
         2759.48 0 1520.69
@@ -163,7 +355,9 @@ if __name__ == "__main__":
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
     downsample_scale = 2**2
-    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
+    # downsample_scale = 1
+    # viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True, cali_pert = 1.5)
+    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True, cali_pert = None)
     
     for cam in viewpoint_stack:
         print(f"cam.uid = {cam.uid}")
@@ -192,8 +386,33 @@ if __name__ == "__main__":
     ## visualization
     use_gui = False
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    print("sfm.MODULE_TEST_CALIBRATION = ", sfm.MODULE_TEST_CALIBRATION)
+    sfm.MODULE_TEST_CALIBRATION = True
     sfm.optimize()
     sfm.close()
+
+    current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    path = "./results/sfm/" + image_dir.split("/")[-2] + "/" + current_datetime
+    # read R_gt, t_gt
+    # image_dir
+    # R_gt, t_gt = read_gt(image_dir)
+
+    # evaluate pose
+    downsample_scale = 2**2
+    ground_truth_dir = image_dir.replace("/images", "/groundtruth")
+    R_gts, T_gts, fxs, fys = load_gt(ground_truth_dir)
+    for i in range(len(viewpoint_stack)):
+        viewpoint_stack[i].R_gt = R_gts[i]
+        viewpoint_stack[i].T_gt = T_gts[i]
+        viewpoint_stack[i].fx_init = fxs[i] / downsample_scale
+        viewpoint_stack[i].fy_init = fys[i] / downsample_scale
+        # viewpoint_stack[i].kappa_init = kappa[i] / downsample_scale
+    
+    eval_ate(sfm.viewpoint_stack, [i for i in range(len(sfm.viewpoint_stack))], save_dir=path, iterations=0, final=True, monocular=True)
+    save_cali(save_dir=path, frames=sfm.viewpoint_stack, kf_indices=[i for i in range(len(sfm.viewpoint_stack))], N_frames=None)
+    
+    
+    save_rendering(sfm.viewpoint_stack, sfm.gaussians, [i for i in range(len(sfm.viewpoint_stack))], pipe, path)
 
     # sfm.show_rendered_images()
     
@@ -233,6 +452,6 @@ if __name__ == "__main__":
     #     sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
     
 
-    Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
+    # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
 
 

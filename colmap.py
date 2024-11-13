@@ -141,10 +141,11 @@ class ColMap:
 
 
 # a function to create a list of Camera classes in 3DGS/MonoGS
-def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_calib = True):
+def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_calib = True, cali_pert = None):
     camera_stack = []
     camera_centers = []
     calib_stack, avg_K, avg_kappa = colmap.getCalibration()
+    print("Calibration: ", avg_K, avg_kappa)
     posed_image_stack = colmap.getCamPosedImages()
 
     for image_id, item in posed_image_stack.items():
@@ -163,18 +164,18 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_cal
         image_width = gt_image.shape[2]
         
         if use_same_calib:
-            fx = avg_K[0, 0]  / downsample_scale
-            fy = avg_K[1, 1]  / downsample_scale
-            cx = avg_K[0, 2]  / downsample_scale
-            cy = avg_K[1, 2]  / downsample_scale
+            fx = ( avg_K[0, 0]  / downsample_scale ) * cali_pert if cali_pert is not None else avg_K[0, 0]  / downsample_scale
+            fy = ( avg_K[1, 1]  / downsample_scale ) * cali_pert if cali_pert is not None else avg_K[1, 1]  / downsample_scale
+            cx = ( avg_K[0, 2]  / downsample_scale ) * cali_pert if cali_pert is not None else avg_K[0, 2]  / downsample_scale
+            cy = ( avg_K[1, 2]  / downsample_scale ) * cali_pert if cali_pert is not None else avg_K[1, 2]  / downsample_scale
             kappa = avg_kappa / downsample_scale
         else:
             K, kappa = calib_stack[camera_id]
-            fx = K[0, 0]  / downsample_scale
-            fy = K[1, 1]  / downsample_scale
-            cx = K[0, 2]  / downsample_scale
-            cy = K[1, 2]  / downsample_scale
-            kappa = kappa / downsample_scale
+            fx = ( K[0, 0]  / downsample_scale ) * cali_pert if cali_pert is not None else K[0, 0]  / downsample_scale
+            fy = ( K[1, 1]  / downsample_scale ) * cali_pert if cali_pert is not None else K[1, 1]  / downsample_scale
+            cx = ( K[0, 2]  / downsample_scale ) * cali_pert if cali_pert is not None else K[0, 2]  / downsample_scale
+            cy = ( K[1, 2]  / downsample_scale ) * cali_pert if cali_pert is not None else K[1, 2]  / downsample_scale
+            kappa = ( kappa / downsample_scale ) * cali_pert if cali_pert is not None else kappa / downsample_scale
 
         cam = Camera (
                     uid = image_id,
