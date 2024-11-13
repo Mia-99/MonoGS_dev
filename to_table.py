@@ -202,6 +202,14 @@ class Experiment():
         self.gt_ply_path = '/datasets/office1_mesh.ply'
         self.gt_pcd = o3d.io.read_point_cloud(self.ply_path)
         pass
+    
+    def load_intrinsics(self):
+        # intrinsic_filename
+        # dataset_path
+        self.intrinsics_path = read_json_file(os.path.join(self.path, 'cali', 'final_result.json'))
+        if self.intrinsics is None:
+            return False
+        return True
 
     def compare_ply(self):
         # Debug
@@ -304,9 +312,7 @@ class Experiment():
 
                     viewpoint.R = self.trj_est_torch[i][:3, :3]
                     viewpoint.T = self.trj_est_torch[i][:3, 3]
-                    viewpoint.fx = self.focal_est[i]
-                    viewpoint.fy = self.focal_est[i]
-                    viewpoint.kappa = self.kappa_est[i]
+                    viewpoint.update_calibration(self.focal_est[i], self.focal_est[i], self.kappa_est[i])
                     # viewpoint.fx = self.focal_gt[i]
                     # viewpoint.fy = self.focal_gt[i]
                     # viewpoint.kappa = self.kappa_gt[i]

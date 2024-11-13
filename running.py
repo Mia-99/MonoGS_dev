@@ -1,5 +1,5 @@
 import os
-os.environ['MPLBACKEND'] = 'Agg'
+# os.environ['MPLBACKEND'] = 'Agg'
 
 # Base command
 # types=['mono', 'rgbd']
@@ -7,8 +7,8 @@ os.environ['MPLBACKEND'] = 'Agg'
 # versions = ['', '_v0_sp', '_v0', '_v1_sp', '_v1', '_v2_sp', '_v2', '_v3_sp', '_v3', '_v4_sp', '_v4', '_v5_sp', '_v5', '_v6_sp', '_v6', '_v7', '_v8']
 
 
-# types=['mono']
-types=['rgbd']
+types=['mono']
+# types=['rgbd']
 # seqs = ["0"]
 # versions = ['_v6_sp', '_v6']
 # seqs = ["1"]
@@ -36,11 +36,12 @@ types=['rgbd']
 #     "4": ["_v0",'']
 # }
 data_dict = {
-    # "0": ["_sp","_v6",'','_v6_sp'],
-    # "1": ["_sp"],
-    "2": ["_v3_sp", "_v3"],
-    # "3": ["_sp"],
-    # "4": ["_sp"]
+    "0": ["_300400_1_50","_300400_1_100","_300400_1_150","_300400_1_200","_300400_1_250","_300400_1_300","_300400_1_350","_300400_1_400","_300400_1_450","_300400_1_500","_300400_1_550","_300400_1_600","_300400_1_650","_300400_1_700"],
+    # "1": ["_v0",'','_sp'],
+    # "1": ['_v0','_v0_sp'],
+    # "2": ["_v3_sp", "_v3"],
+    # "3": ["_v1",'','_sp'],
+    # "4": ['_v0_sp', '_v0']
 }
 # data_dict = {
 #     # "0": [""],
@@ -69,7 +70,7 @@ for type in types:
                 os.makedirs(f'./cmd_output/office{seq}', exist_ok=True)
                 output_file = f'./cmd_output/office{seq}/office{seq}_{version}.txt'
                 # base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration --allow_lens_distortion | tee {output_file}"
-                base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration | tee {output_file}"
+                # base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration | tee {output_file}"
                 base_command = f"python slam_cali.py --config {config_file_path} --eval"
                 
                 # Construct the full command
