@@ -94,6 +94,8 @@ class Viewer:
         self.g_scale_modifier = 1.0
         self.camera_size = 0.1
 
+        self.render_mode = -1 # -1,  4
+
         '''
             Open3D Visualizer Example
             link: https://github.com/isl-org/Open3D/blob/73508bcaba0a9a31e398bf8de76e3bbeaed81540/examples/python/visualization/video.py                 
@@ -134,6 +136,8 @@ class Viewer:
         self.widget3d_width_ratio = 1.0
         self.widget3d_width = self.window.size.width
 
+        print("here1")
+
         """
         For visualize 3DGS ellipsoids
         """
@@ -145,19 +149,22 @@ class Viewer:
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glDepthFunc(gl.GL_LEQUAL)
 
+        print("here2")
 
         # get current camera view
         (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
 
-        # W2C = np.array(
-        #                 [[-9.43868041e-01,  2.80348748e-01,  1.74693331e-01, -1.74692627e-02],
-        #                 [-2.82218784e-01, -9.59239423e-01,  1.45645794e-02, -1.45645207e-03],
-        #                 [ 1.71655729e-01, -3.55546921e-02,  9.84515131e-01,  5.70783520e+00],
-        #                 [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  1.00000000e+00]]
-        # )
-        # W = 600
-        # H = 400
-        # FoVy = 0.7853981633974483
+        print("here3")
+
+        W2C = np.array(
+                        [[-9.43868041e-01,  2.80348748e-01,  1.74693331e-01, -1.74692627e-02],
+                        [-2.82218784e-01, -9.59239423e-01,  1.45645794e-02, -1.45645207e-03],
+                        [ 1.71655729e-01, -3.55546921e-02,  9.84515131e-01,  5.70783520e+00],
+                        [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  1.00000000e+00]]
+        )
+        W = 600
+        H = 400
+        FoVy = 0.7853981633974483
 
         W2C = np.array(
                         [[1,  0,  0, 0],
@@ -172,13 +179,15 @@ class Viewer:
         viewpoint = frustum.view_dir
         self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
 
-        self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
-        self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)
-        self.save_figure()
+        print("here4")
+
+        print("here5")
 
         # a thread that helps to update view-control
         self.is_done = False
         threading.Thread(target=self._update_thread).start()
+
+        print("here6")
 
         app.run()
         glfw.terminate()
@@ -198,6 +207,7 @@ class Viewer:
             glfw.terminate()
             exit(1)
         return window
+
 
 
     def plot_cameras(self, viewpoint_stack = None, color = [0, 1, 0], camera_size=0.1):
@@ -246,19 +256,10 @@ class Viewer:
 
 
 
-    def update_background(self):
-        (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
-        print(f"\ncurrent view info:")
-        print(f"\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}")
-        print(f"\tW2C:\n{W2C}")
-        # ## compute_Gaussian_background here:
-        self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
-        
-
     def _update_thread(self):
 
         # create glfw context at update thread
-        # WIDTH, HEIGHT = self.WIDTH, self.HEIGHT
+        # HEIGHT, WIDTH = int(self.window.size.height), int(self.widget3d_width*self.widget3d_width_ratio)
         # self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
         # self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
         # glfw.make_context_current(self.window_gl)
@@ -266,16 +267,27 @@ class Viewer:
         # This is NOT the UI thread, need to call post_to_main_thread() to update
         # the scene or any part of the UI.
         while True:
-            time.sleep(0.01)
+            time.sleep(0.1)
             if self.is_done:
                 o3d.visualization.gui.Application.instance.quit()
                 time.sleep(0.01)
                 break
 
-            self.update_background()
+
+            (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
+            print(f"\ncurrent view info:")
+            print(f"\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}")
+            print(f"\tW2C:\n{W2C}")
+            
+            # ## compute_Gaussian_background here:
+            self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
+            
+            # plt.imshow(self.render_img)
+            # plt.show()  
 
             # Update the images. This must be done on the UI thread.
             def update():
+                # print(f"size of rendered image ==== = {self.render_img}")
                 self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)                
                 time.sleep(0.01)
                 self.save_figure()
@@ -347,7 +359,16 @@ class Viewer:
     def render_o3d_image(self, W2C, FoVy, HEIGHT, WIDTH):
 
         self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
+        glfw.make_context_current(self.window_gl)
+
+        w = int(WIDTH * self.widget3d_width_ratio)
+        glfw.set_window_size(self.window_gl, w, HEIGHT)
+
         self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
+
+        self.g_camera.update_resolution(HEIGHT, WIDTH)
+        self.g_renderer.set_render_reso(WIDTH, HEIGHT)        
+        
         
         glfw.poll_events()
         gl.glClearColor(0, 0, 0, 1.0)
@@ -357,24 +378,28 @@ class Viewer:
             | gl.GL_STENCIL_BUFFER_BIT
         )
 
-        w = int(WIDTH * self.widget3d_width_ratio)
-        glfw.set_window_size(self.window_gl, w, HEIGHT)
 
         C2W = np.linalg.inv(W2C)
         frustum = create_frustum( C2W )
-        # viewpoint = frustum.view_dir
-        # self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
 
         self.g_camera.fovy = FoVy
-        self.g_camera.update_resolution(HEIGHT, w)
+        self.g_camera.update_resolution(height=HEIGHT, width=w)
         self.g_renderer.set_render_reso(w, HEIGHT)
+
+        # frustum = create_frustum(
+        #                 np.linalg.inv(cv_gl @ self.widget3d.scene.camera.get_view_matrix())
+        #             )
+
         self.g_camera.position = frustum.eye.astype(np.float32)
         self.g_camera.target = frustum.center.astype(np.float32)
         self.g_camera.up = frustum.up.astype(np.float32)
 
         self.update_activated_renderer_state(self.gaussians_gl)
+        self.g_renderer.set_render_reso(w, HEIGHT)
+
         self.g_renderer.sort_and_update(self.g_camera)
         width, height = glfw.get_framebuffer_size(self.window_gl)
+
         self.g_renderer.draw()
         bufferdata = gl.glReadPixels(
             0, 0, width, height, gl.GL_RGB, gl.GL_UNSIGNED_BYTE
@@ -384,6 +409,8 @@ class Viewer:
         render_img = o3d.geometry.Image(img)
         glfw.swap_buffers(self.window_gl)
 
+        glfw.terminate()
+
         return render_img
 
 
@@ -391,7 +418,7 @@ class Viewer:
         self.g_renderer.update_gaussian_data(gaus)
         self.g_renderer.sort_and_update(self.g_camera)
         self.g_renderer.set_scale_modifier(self.g_scale_modifier)
-        self.g_renderer.set_render_mod(-1-3) # original 7-3
+        self.g_renderer.set_render_mod(self.render_mode-3) # original 7-3
         self.g_renderer.update_camera_pose(self.g_camera)
         self.g_renderer.update_camera_intrin(self.g_camera)
         self.g_renderer.set_render_reso(self.g_camera.w, self.g_camera.h)
