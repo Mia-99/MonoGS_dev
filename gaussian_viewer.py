@@ -261,7 +261,7 @@ class Viewer:
         # This is NOT the UI thread, need to call post_to_main_thread() to update
         # the scene or any part of the UI.
         while True:
-            time.sleep(0.1)
+            time.sleep(0.01)
             if self.is_done:
                 o3d.visualization.gui.Application.instance.quit()
                 time.sleep(0.01)
@@ -353,15 +353,15 @@ class Viewer:
     def render_o3d_image(self, W2C, FoVy, HEIGHT, WIDTH):
 
         self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
-        glfw.make_context_current(self.window_gl)
+        # glfw.make_context_current(self.window_gl)
 
         w = int(WIDTH * self.widget3d_width_ratio)
-        glfw.set_window_size(self.window_gl, w, HEIGHT)
+        # glfw.set_window_size(self.window_gl, w, HEIGHT)
 
         self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
 
-        self.g_camera.update_resolution(HEIGHT, WIDTH)
-        self.g_renderer.set_render_reso(WIDTH, HEIGHT)        
+        # self.g_camera.update_resolution(HEIGHT, WIDTH)
+        # self.g_renderer.set_render_reso(WIDTH, HEIGHT)        
         
         
         glfw.poll_events()

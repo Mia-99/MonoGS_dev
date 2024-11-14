@@ -23,14 +23,36 @@ from PIL import Image
 from gaussian_splatting.utils.general_utils import PILtoTorch
 
 import open3d as o3d
+import copy
 
 
+import pickle 
 
 from sfm import SFM
 from colmap import ColMap
 from colmap import assemble_3DGS_cameras
 
 from gaussian_viewer import Viewer, create_gaussians_gl
+
+
+from utils.eval_utils import evaluate_evo, eval_ate, eval_rendering
+
+
+from evo.core import metrics, trajectory
+from evo.core.metrics import PoseRelation, Unit
+from evo.core.trajectory import PosePath3D, PoseTrajectory3D
+from evo.tools import plot
+from evo.tools.plot import PlotMode
+from evo.tools.settings import SETTINGS
+from matplotlib import pyplot as plt
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+
+import wandb
+from gaussian_splatting.gaussian_renderer import render
+from gaussian_splatting.utils.image_utils import psnr
+from gaussian_splatting.utils.loss_utils import ssim
+from gaussian_splatting.utils.system_utils import mkdir_p
+
 
 
 # from depth_anything import DepthAnything
@@ -80,13 +102,99 @@ from gaussian_viewer import Viewer, create_gaussians_gl
 
 
 
+def eval_rendering_metrics(rendered_images, captured_images):
+    psnr_array, ssim_array, lpips_array = [], [], []
+    cal_lpips = LearnedPerceptualImagePatchSimilarity(
+            net_type="alex", normalize=True
+        )
+    for idx in range(len(rendered_images)):
+        image = rendered_images[idx]
+        gt_image = captured_images[idx]
 
-if __name__ == "__main__":
+        mask = gt_image > 0
+
+        psnr_score = psnr((image[mask]).unsqueeze(0), (gt_image[mask]).unsqueeze(0))
+        ssim_score = ssim((image).unsqueeze(0), (gt_image).unsqueeze(0))
+        lpips_score = cal_lpips((image).unsqueeze(0), (gt_image).unsqueeze(0))
+
+        psnr_array.append(psnr_score.item())
+        ssim_array.append(ssim_score.item())
+        lpips_array.append(lpips_score.item())
+    return psnr_array, ssim_array, lpips_array
+
+
+def eval_pose_metrics_translation(poses_gt, poses_est, monocular=True):
+    ## Plot
+    traj_ref = PosePath3D(poses_se3=poses_gt)
+    traj_est = PosePath3D(poses_se3=poses_est)
+    traj_est_aligned = copy.deepcopy(traj_est)
+    traj_est_aligned.align(traj_ref, correct_scale=monocular)
+    # below old method does not work anymore
+    # traj_est_aligned = trajectory.align_trajectory(
+    #     traj_est, traj_ref, correct_scale=monocular
+    # )
+
+    ## RMSE
+    pose_relation = metrics.PoseRelation.translation_part
+    data = (traj_ref, traj_est_aligned)
+    ape_metric = metrics.APE(pose_relation)
+    ape_metric.process_data(data)
+    ape_stat = ape_metric.get_statistic(metrics.StatisticsType.rmse)
+    ape_stats = ape_metric.get_all_statistics()
+
+    return (ape_stat, ape_stats)
 
 
 
-    mp.set_start_method('spawn')
+def eval_pose_metrics_rotation(poses_gt, poses_est, monocular=True):
+    ## Plot
+    traj_ref = PosePath3D(poses_se3=poses_gt)
+    traj_est = PosePath3D(poses_se3=poses_est)
+    traj_est_aligned = copy.deepcopy(traj_est)
+    traj_est_aligned.align(traj_ref, correct_scale=monocular)
+    # below old method does not work anymore
+    # traj_est_aligned = trajectory.align_trajectory(
+    #     traj_est, traj_ref, correct_scale=monocular
+    # )
 
+    ## RMSE
+    pose_relation = metrics.PoseRelation.rotation_part
+    data = (traj_ref, traj_est_aligned)
+    ape_metric = metrics.APE(pose_relation)
+    ape_metric.process_data(data)
+    ape_stat = ape_metric.get_statistic(metrics.StatisticsType.rmse)
+    ape_stats = ape_metric.get_all_statistics()
+
+    return (ape_stat, ape_stats)
+
+
+def read_groundtruth_camera(ground_truth_camera_file):    
+    with open(ground_truth_camera_file, 'r') as f:
+        lines = f.readlines()
+    lst = []
+    for line in lines:
+        arr = np.fromstring(line, sep=' ')
+        lst.append(arr)
+
+    K = np.array(lst[0:3])
+    # print(f"K = \n{K}")
+
+    R = np.array(lst[4:7])
+    T = lst[7]
+
+    pose = np.eye(4)
+    pose[0:3, 0:3] = R #.transpose() # debugged using rotation error
+    pose[0:3, 3] = T
+    # print(f"pose = \n {pose}\n")
+    W2C = np.linalg.inv(pose)
+
+    img_size = lst[8]
+    width, height = int(img_size[0]), int(img_size[1])
+
+    return (K, W2C, width, height)
+
+
+def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, set_focal_error = None):
 
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -124,6 +232,126 @@ if __name__ == "__main__":
     opt.densify_grad_threshold = 0.0002
 
 
+    # perform colmap reconstruction
+    reconstruction = ColMap(image_dir)
+
+    colmap_posed_image_stack = reconstruction.getCamPosedImages()
+    for image_id, item in colmap_posed_image_stack.items():
+        R, T, imgname, camera_id = item
+        print(imgname)
+
+
+    # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
+    
+    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
+    
+    for cam in viewpoint_stack:
+        print(f"cam.uid = {cam.uid}")
+        if set_focal_error is not None:
+            focal = cam.fx + set_focal_error
+            cam.fx = focal
+            cam.fy = cam.aspect_ratio * focal
+
+
+    print(f"scale_info = {scale_info}")
+    cameras_extent = scale_info["radius"]
+
+    # initialize 3D Gaussians from sparse Colmap output
+    gaussians = GaussianModel(sh_degree=0)
+    gaussians.spatial_lr_scale = cameras_extent
+    
+    positions, colors = reconstruction.getPointCloud()
+    pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
+    gaussians.create_from_pcd(pcd, cameras_extent)
+    gaussians.training_setup(opt)
+
+    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
+
+    torch.autograd.set_detect_anomaly(args.detect_anomaly)
+
+    ## visualization
+    use_gui = False
+    sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+
+    sfm.optimize(phase1_iter = phase1_iter,
+                 phase3_iter = phase3_iter,
+                 phase2_DBA_iter = phase2_DBA_iter,
+                 phase2_CaliDBA_iter = phase2_CaliDBA_iter)
+
+    (W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images) = sfm.eval_data()
+
+    # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
+    uid_arr = []
+    for viewpoint in viewpoint_stack:
+        uid_arr.append(viewpoint.uid)
+
+
+    gt_W2C_dic = {}
+    for image_id, item in colmap_posed_image_stack.items():
+        uid = image_id
+        R, T, imgname, camera_id = item        
+        (K, pose, width, height) = read_groundtruth_camera(gt_dir + '/' + imgname + '.camera')
+        gt_W2C_dic[uid] = pose
+        # print("uid ", uid)
+    gt_W2C_arr = []
+    for uid in uid_arr:
+        gt_W2C_arr.append ( gt_W2C_dic[uid] )
+    # print(uid_arr)
+    
+    psnr_array, ssim_array, lpips_array = eval_rendering_metrics(rendered_images, captured_images)
+
+    gt_C2W_arr, C2W_arr = [], []
+    gt_centers, centers = [], []
+    for pose in gt_W2C_arr:
+        gt_C2W_arr.append( np.linalg.inv(pose) )
+        gt_centers.append( np.linalg.inv(pose)[0:3, 3] )
+    for pose in W2C_arr:
+        C2W_arr.append( np.linalg.inv(pose) )
+        centers.append( np.linalg.inv(pose)[0:3, 3] )
+
+    (ape_stat_trans, ape_stats_trans) = eval_pose_metrics_translation(gt_C2W_arr, C2W_arr, monocular=True)
+    (ape_stat_rot, ape_stats_rot) = eval_pose_metrics_rotation(gt_C2W_arr, C2W_arr, monocular=True)
+
+
+    if False:
+        traj_ref = PosePath3D(poses_se3=gt_C2W_arr)
+        traj_est = PosePath3D(poses_se3=C2W_arr)
+        traj_est_aligned = copy.deepcopy(traj_est)
+        traj_est_aligned.align(traj_ref, correct_scale=True)
+
+        # print(traj_ref.poses_se3)
+        # print(traj_est_aligned.poses_se3)
+        gt_centers, centers = [], []
+        for pose in traj_ref.poses_se3:
+            gt_centers.append( pose[0:3, 3] )
+        for pose in traj_est_aligned.poses_se3:
+            centers.append( pose[0:3, 3] )
+
+        gt_centers = np.array(gt_centers).transpose()
+        centers = np.array(centers).transpose()
+        ax = plt.axes(projection='3d')
+        ax.plot3D(gt_centers[0], gt_centers[1], gt_centers[2], 'red')
+        ax.plot3D(centers[0], centers[1], centers[2], 'blue')
+        plt.axis('equal')
+        plt.show()
+
+
+    psnr_mean = float(np.mean(psnr_array))
+    ssim_mean = float(np.mean(ssim_array))
+    lpips_mean = float(np.mean(lpips_array))
+
+    fx = viewpoint_stack[-1].fx
+    fy = viewpoint_stack[-1].fy
+    kappa = viewpoint_stack[-1].kappa
+
+    return (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+
+if __name__ == "__main__":
+
+    mp.set_start_method('spawn')
+
     """ DATASET URL
     
     https://colmap.github.io/datasets.html#datasets
@@ -140,6 +368,7 @@ if __name__ == "__main__":
 
     data_url = "https://cvg-data.inf.ethz.ch/local-feature-evaluation-schoenberger2017/Strecha-Herzjesu.zip"
     image_dir = "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images"
+    gt_dir =    "/hdd/sfm/Strecha-Herzjesu/Herzjesu/groundtruth"
     '''
     ground_truth calibration:
         2759.48 0 1520.69
@@ -148,6 +377,7 @@ if __name__ == "__main__":
     
     data_url = "https://cvg-data.inf.ethz.ch/local-feature-evaluation-schoenberger2017/Strecha-Fountain.zip"
     image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+    gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
     '''
     ground_truth calibration:
         2759.48 0 1520.69
@@ -155,84 +385,104 @@ if __name__ == "__main__":
     '''
 
 
-    # use_pcd_from_depth_prediction = False
+    set_focal = 500
+
+    results = {}
 
 
-    # perform colmap reconstruction
-    reconstruction = ColMap(image_dir)
 
-    # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
-    downsample_scale = 2**2
-    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
+    if True:
+        image_dir = "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images"
+        gt_dir =    "/hdd/sfm/Strecha-Herzjesu/Herzjesu/groundtruth"
+
+        # w/o clibration
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500)
+        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
+        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
+        print(f"Herzjesu[w/o]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
+        results["Herzjesu[w/o]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
     
-    for cam in viewpoint_stack:
-        print(f"cam.uid = {cam.uid}")
+        # w/ calibration
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 600,
+                                                                                    phase2_CaliDBA_iter = 0)
+        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
+        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
+        print(f"Herzjesu[w/.]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
+        results["Herzjesu[w/.]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
 
-    print(f"scale_info = {scale_info}")
-    cameras_extent = scale_info["radius"]
 
-    # initialize 3D Gaussians from sparse Colmap output
-    gaussians = GaussianModel(sh_degree=0)
-    gaussians.spatial_lr_scale = cameras_extent
+        # w/ calibration. 50
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 600,
+                                                                                    phase2_CaliDBA_iter = 0, set_focal_error=50)
+        results["Herzjesu[w/50]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
+
+
+
+    if True:
+        image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+        gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
+
+        # w/o clibration
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500)
+        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
+        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
+        print(f"Fountain[w/o]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
+        results["Fountain[w/o]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
     
-    positions, colors = reconstruction.getPointCloud()
-    pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
-    gaussians.create_from_pcd(pcd, cameras_extent)
-    gaussians.training_setup(opt)
+        # w/ calibration
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 600,
+                                                                                    phase2_CaliDBA_iter = 0)
+        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
+        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
+        print(f"Fountain[w/.]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
+        results["Fountain[w/.]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
 
 
-    for cam in viewpoint_stack:
-        print(f"cam.uid = {cam.uid}")
+        # w/ calibration. 50
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 600,
+                                                                                    phase2_CaliDBA_iter = 0, set_focal_error=50)
+        results["Fountain[w/50]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
 
 
-    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
-
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
-
-    ## visualization
-    use_gui = False
-    sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
-    sfm.optimize()
-    sfm.close()
-
-    # sfm.show_rendered_images()
-    
 
 
-    # From dense depth prediction of a neural network
-    # if use_pcd_from_depth_prediction:
-    #     positions, colors = init_dense_pcd_from_network(viewpoint_stack, reconstruction, num_points = 50000)
-    #     sfm.add_dense_point_cloud(positions=positions, colors=colors)
-    
-
-    # sfm.start_calib_iter = 250
-    # sfm.stop_calib_iter = 500
-
-    # sfm.start_pose_iter = 200
-    # sfm.stop_pose_iter = 500
-
-    # sfm.start_gaussian_iter = 0
-    # sfm.stop_gaussian_iter = 100000
-
-    # sfm.add_dense_pcd_iter = 500
 
 
-    # sfm.require_calibration = True
-    # sfm.allow_lens_distortion = True
-    
 
-    # sfm_process = mp.Process(target=sfm.optimize)
-    # sfm_process.start()
 
-  
-    # torch.cuda.synchronize()
+    if 10000:
 
-    # if use_gui:
-    #     q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-    #     gui_process.join()
-    #     sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
-    
+        print("results")
+        print(results)
 
-    Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
 
+        with open('saved_results.pkl', 'wb') as f:
+            pickle.dump(results, f)
+
+
+        with open('saved_results.pkl', 'rb') as f:
+            loaded_dict = pickle.load(f)
+
+        print("loaded dict")
+        print(loaded_dict)
 
