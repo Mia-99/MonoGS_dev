@@ -53,7 +53,8 @@ from gaussian_splatting.utils.image_utils import psnr
 from gaussian_splatting.utils.loss_utils import ssim
 from gaussian_splatting.utils.system_utils import mkdir_p
 
-
+import pathlib
+import cv2
 
 # from depth_anything import DepthAnything
 # def init_dense_pcd_from_network (viewpoint_stack, reconstruction: ColMap, num_points = 20000):
@@ -194,7 +195,7 @@ def read_groundtruth_camera(ground_truth_camera_file):
     return (K, W2C, width, height)
 
 
-def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, set_focal_error = None):
+def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, set_focal_error = None, save_to_dir = None):
 
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -245,12 +246,15 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
     
-    for cam in viewpoint_stack:
-        print(f"cam.uid = {cam.uid}")
-        if set_focal_error is not None:
-            focal = cam.fx + set_focal_error
-            cam.fx = focal
-            cam.fy = cam.aspect_ratio * focal
+    # This is bad as it breaks the initial colmap configuration, before a proper 3D gaussian densification stage
+    # This might as well if a dense intialization if available
+    #
+    # for cam in viewpoint_stack:
+    #     print(f"cam.uid = {cam.uid}")
+    #     if set_focal_error is not None:
+    #         focal = cam.fx + set_focal_error
+    #         cam.fx = focal
+    #         cam.fy = cam.aspect_ratio * focal
 
 
     print(f"scale_info = {scale_info}")
@@ -272,13 +276,18 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     ## visualization
     use_gui = False
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    sfm.require_calibration = True
+    sfm.allow_lens_distortion = True
 
     sfm.optimize(phase1_iter = phase1_iter,
                  phase3_iter = phase3_iter,
                  phase2_DBA_iter = phase2_DBA_iter,
-                 phase2_CaliDBA_iter = phase2_CaliDBA_iter)
+                 phase2_CaliDBA_iter = phase2_CaliDBA_iter,
+                 phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
+                 set_focal_error = set_focal_error)
 
-    (W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images) = sfm.eval_data()
+    (W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images, error_images) = sfm.eval_data()
+
 
     # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
     uid_arr = []
@@ -313,7 +322,7 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     (ape_stat_rot, ape_stats_rot) = eval_pose_metrics_rotation(gt_C2W_arr, C2W_arr, monocular=True)
 
 
-    if False:
+    if False: # used to test trajectory alignment
         traj_ref = PosePath3D(poses_se3=gt_C2W_arr)
         traj_est = PosePath3D(poses_se3=C2W_arr)
         traj_est_aligned = copy.deepcopy(traj_est)
@@ -334,6 +343,37 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
         ax.plot3D(centers[0], centers[1], centers[2], 'blue')
         plt.axis('equal')
         plt.show()
+
+    if save_to_dir is not None:
+        pathlib.Path(save_to_dir).mkdir(parents=True, exist_ok=True)
+        for idx in range( len(rendered_images) ):
+            psnr = psnr_array[idx]
+
+            rgb = sfm.tensor2rgb(rendered_images[idx])
+            plt.imshow(rgb)
+            plt.axis('off')
+            plt.text(1, 1, str(round(psnr, 2)), bbox=dict(fill=True, edgecolor=None, facecolor='black', linewidth=0, alpha=0.8, pad = 0), ha='left', va='top', color='white')
+            plt.savefig(os.path.join(save_to_dir, str(idx)+'_rendering'+'.png'), bbox_inches='tight', pad_inches=0)
+            plt.close()
+            time.sleep(0.01)
+
+            rgb = sfm.tensor2rgb(captured_images[idx])
+            plt.imshow(rgb)
+            plt.axis('off')
+            plt.text(1, 1, "ground_truth: "+str(idx), bbox=dict(fill=True, edgecolor=None, facecolor='lavender', linewidth=0, alpha=1.0, pad = 0), ha='left', va='top', color='r')
+            plt.savefig(os.path.join(save_to_dir, str(idx)+'_original'+'.png'), bbox_inches='tight', pad_inches=0)
+            plt.close()
+            time.sleep(0.01)
+
+            errormap = error_images[idx].permute(1, 2, 0).contiguous().cpu().numpy()
+            plt.imshow(errormap, vmin=0, vmax=0.1, cmap='hot')
+            plt.axis('off')
+            plt.colorbar()
+            plt.text(1, 1, str(round(psnr, 2)), bbox=dict(fill=True, edgecolor=None, facecolor='lightyellow', linewidth=0, alpha=1.0, pad = 0), ha='left', va='top', color='g')
+            plt.savefig(os.path.join(save_to_dir, str(idx)+'_errormap'+'.png'), bbox_inches='tight', pad_inches=0)            
+            plt.close()
+            time.sleep(0.01)
+
 
 
     psnr_mean = float(np.mean(psnr_array))
@@ -384,14 +424,71 @@ if __name__ == "__main__":
         0 2764.16 1006.81
     '''
 
-
-    set_focal = 500
-
     results = {}
 
+    runSfMDebug = True
+
+    runBatchExp = False
+    runSaveRendering = False
 
 
-    if True:
+
+    if runSfMDebug:
+
+        image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+        gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 100,
+                                                                                    phase3_iter = 5,
+                                                                                    phase2_DBA_iter = 20,
+                                                                                    phase2_CaliDBA_iter = 6, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=100,
+                                                                                    save_to_dir=os.path.join(os.getcwd(), "Debug/withCalib"))
+        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
+        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
+
+
+
+
+
+    if runSaveRendering:
+        image_dir = "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images"
+        gt_dir =    "/hdd/sfm/Strecha-Herzjesu/Herzjesu/groundtruth"
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 650,
+                                                                                    phase2_CaliDBA_iter = 0,
+                                                                                    phase2_CaliDBA_GSS_iter = 0,
+                                                                                    save_to_dir=os.path.join(os.getcwd(), "Herzjesu/without"))
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500,
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    save_to_dir=os.path.join(os.getcwd(), "Herzjesu/withCalib"))
+        image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
+        gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 650,
+                                                                                    phase2_CaliDBA_iter = 0,
+                                                                                    phase2_CaliDBA_GSS_iter = 0,
+                                                                                    save_to_dir=os.path.join(os.getcwd(), "Fountain/without"))
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500,
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    save_to_dir=os.path.join(os.getcwd(), "Fountain/withCalib"))
+
+
+
+    if runBatchExp:
         image_dir = "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images"
         gt_dir =    "/hdd/sfm/Strecha-Herzjesu/Herzjesu/groundtruth"
 
@@ -399,36 +496,92 @@ if __name__ == "__main__":
         (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
                                                                                     phase1_iter = 200,
                                                                                     phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500)
-        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
-        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
-        print(f"Herzjesu[w/o]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
-        results["Herzjesu[w/o]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
+                                                                                    phase2_DBA_iter = 650,
+                                                                                    phase2_CaliDBA_iter = 0,
+                                                                                    phase2_CaliDBA_GSS_iter = 0)
+        print(f"Herzjesu[w/o]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
+        results["Herzjesu[w/o]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
     
         # w/ calibration
         (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
                                                                                     phase1_iter = 200,
                                                                                     phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600,
-                                                                                    phase2_CaliDBA_iter = 0)
-        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
-        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
-        print(f"Herzjesu[w/.]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
-        results["Herzjesu[w/.]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500,
+                                                                                    phase2_CaliDBA_GSS_iter = 50)
+        print(f"Herzjesu[w/.]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
+        results["Herzjesu[w/.]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
 
 
         # w/ calibration. 50
         (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
                                                                                     phase1_iter = 200,
                                                                                     phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600,
-                                                                                    phase2_CaliDBA_iter = 0, set_focal_error=50)
-        results["Herzjesu[w/50]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=50)
+        results["Herzjesu[w/50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. 100
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=100)
+        results["Herzjesu[w/100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. 150
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=150)
+        results["Herzjesu[w/150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. -50
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=-50)
+        results["Herzjesu[w/-50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. -100
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=-100)
+        results["Herzjesu[w/-100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
 
 
 
-    if True:
+        # w/ calibration. -150
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=-150)
+        results["Herzjesu[w/-150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+
+    if runBatchExp:
         image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
         gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
 
@@ -436,41 +589,92 @@ if __name__ == "__main__":
         (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
                                                                                     phase1_iter = 200,
                                                                                     phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500)
-        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
-        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
-        print(f"Fountain[w/o]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
-        results["Fountain[w/o]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
+                                                                                    phase2_DBA_iter = 650,
+                                                                                    phase2_CaliDBA_iter = 0,
+                                                                                    phase2_CaliDBA_GSS_iter = 0)
+        print(f"Fountain[w/o]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
+        results["Fountain[w/o]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
     
         # w/ calibration
         (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
                                                                                     phase1_iter = 200,
                                                                                     phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600,
-                                                                                    phase2_CaliDBA_iter = 0)
-        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
-        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
-        print(f"Fountain[w/.]: {[psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]}")
-        results["Fountain[w/.]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500,
+                                                                                    phase2_CaliDBA_GSS_iter = 50)
+        print(f"Fountain[w/.]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
+        results["Fountain[w/.]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
 
 
         # w/ calibration. 50
         (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
                                                                                     phase1_iter = 200,
                                                                                     phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600,
-                                                                                    phase2_CaliDBA_iter = 0, set_focal_error=50)
-        results["Fountain[w/50]"] = [psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa]
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=50)
+        results["Fountain[w/50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. 100
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=100)
+        results["Fountain[w/100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. 150
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=150)
+        results["Fountain[w/150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. -50
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=-50)
+        results["Fountain[w/-50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. -100
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=-100)
+        results["Fountain[w/-100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+
+        # w/ calibration. -150
+        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
+                                                                                    phase1_iter = 200,
+                                                                                    phase3_iter = 500,
+                                                                                    phase2_DBA_iter = 100,
+                                                                                    phase2_CaliDBA_iter = 500, 
+                                                                                    phase2_CaliDBA_GSS_iter = 50,
+                                                                                    set_focal_error=-150)
+        results["Fountain[w/-150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
 
 
 
 
-
-
-
-
-    if 10000:
+    if runBatchExp:
 
         print("results")
         print(results)

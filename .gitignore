@@ -19,3 +19,5 @@ test_*.py
 screenshots
 *output/*
 image*
+*.png
+*.pkl
