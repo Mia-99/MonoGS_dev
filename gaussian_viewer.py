@@ -11,7 +11,8 @@ import threading
 
 import os
 
-from gui.gl_render import util as util
+# from gui.gl_render import util as util
+from gui.gl_render import util_lima as util
 from gui.gl_render import util_gau_lima as util_gau
 from gui.gl_render.render_ogl import OpenGLRenderer
 
@@ -186,6 +187,7 @@ class Viewer:
         if not glfw.init():
             exit(1)
         # glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+        glfw.window_hint(glfw.DECORATED, glfw.TRUE)
         glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
         window = glfw.create_window(
             self.WIDTH, self.HEIGHT, window_name, None, None
@@ -259,12 +261,12 @@ class Viewer:
 
         while not self.is_done:
             
-            time.sleep(0.01)
+            time.sleep(0.015)
 
             # compute_Gaussian_background here (update thread)
             if not glfw.window_should_close(self.window_gl):                
                 (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()                
-                self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
+                self.render_img = self.render_gaussian_background_by_opengl(W2C, FoVy, H, W)
                 print(f"\ncurrent view info:\n\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}\n\tW2C:\n{W2C}")
 
             # Update the images. This must be done on the UI thread.
@@ -273,7 +275,7 @@ class Viewer:
                 self.save_figure()
                 time.sleep(0.001)
 
-            if self.render_img is not None:
+            if (not self.is_done): # need this to close properly. otherwise there will be "Segmentation fault (core dumped)"
                 gui.Application.instance.post_to_main_thread(self.window, update)
 
 
@@ -348,9 +350,9 @@ class Viewer:
 
 
 
-    def render_o3d_image(self, W2C, FoVy, HEIGHT, WIDTH):
+    def render_gaussian_background_by_opengl(self, W2C, FoVy, HEIGHT, WIDTH):
         glfw.poll_events()
-        gl.glClearColor(1.0, 1.0, 1.0, 1.0)
+        gl.glClearColor(0.0, 0.0, 0.0, 1.0)
         gl.glClear(
             gl.GL_COLOR_BUFFER_BIT
             | gl.GL_DEPTH_BUFFER_BIT
@@ -366,12 +368,12 @@ class Viewer:
         self.g_camera.fovy = FoVy
         self.g_camera.update_resolution(h, w)
 
-        frustum = create_frustum(
-            np.linalg.inv(cv_gl @ self.widget3d.scene.camera.get_view_matrix())
-        )
+        # frustum = create_frustum(
+        #     np.linalg.inv(cv_gl @ self.widget3d.scene.camera.get_view_matrix())
+        # )
 
-        # C2W = np.linalg.inv(W2C)
-        # frustum = create_frustum( C2W )
+        C2W = np.linalg.inv(W2C)
+        frustum = create_frustum( C2W )
 
         self.g_camera.position = frustum.eye.astype(np.float32)
         self.g_camera.target = frustum.center.astype(np.float32)
@@ -396,11 +398,8 @@ class Viewer:
         img = np.frombuffer(bufferdata, np.uint8, -1).reshape(height, width, 3)
         img = cv2.flip(img, 0)
 
-        if img is not None:
-            # print(f"self.rendered_imgage: {img.shape}")
-            self.render_img = o3d.geometry.Image(img)
-        else:
-            self.render_img = None
+        # print(f"self.rendered_imgage: {img.shape}")
+        self.render_img = o3d.geometry.Image(img)
 
         glfw.swap_buffers(self.window_gl)
         gl.glFinish()
