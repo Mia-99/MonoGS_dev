@@ -433,7 +433,7 @@ if __name__ == "__main__":
     runBatchExp = 1
     runSaveRendering = 1
 
-    GSS_iter = 20
+    GSS_iter = 0
 
 
     if runSfMDebug:
