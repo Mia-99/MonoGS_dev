@@ -13,7 +13,7 @@ import os
 
 from gui.gl_render import util as util
 from gui.gl_render import util_gau_lima as util_gau
-from gui.gl_render import render_ogl as render_ogl
+from gui.gl_render.render_ogl import OpenGLRenderer
 
 
 from gui.gui_utils import create_frustum, cv_gl
@@ -22,15 +22,13 @@ import cv2
 
 from OpenGL import GL as gl
 import glfw
-import imgui
-from imgui.integrations.glfw import GlfwRenderer
+
+
 import json
 
 import matplotlib.pyplot as plt
 
 from gaussian_splatting.utils.graphics_utils import fov2focal, getWorld2View2
-
-
 
 import torch
 
@@ -102,7 +100,7 @@ class Viewer:
             link: https://github.com/isl-org/Open3D/blob/73508bcaba0a9a31e398bf8de76e3bbeaed81540/examples/python/visualization/video.py                 
         '''
 
-        self.WIDTH, self.HEIGHT = 600, 400
+        self.WIDTH, self.HEIGHT = 1200, 800
 
         self.window = gui.Application.instance.create_window ( "viewer: figure saved automatically", width=self.WIDTH, height=self.HEIGHT )
         self.window.set_on_layout(self._on_layout)
@@ -111,10 +109,21 @@ class Viewer:
 
         self.widget3d = gui.SceneWidget()
         self.widget3d.scene = rendering.Open3DScene(self.window.renderer)
+        cg_settings = rendering.ColorGrading(
+            rendering.ColorGrading.Quality.ULTRA,
+            rendering.ColorGrading.ToneMapping.LINEAR,
+        )
+        self.widget3d.scene.view.set_color_grading(cg_settings)
         self.window.add_child(self.widget3d)
 
         self.lit = rendering.MaterialRecord()
-        self.lit.shader = "defaultLit"
+        self.lit.shader = "unlitLine"
+
+        self.lit_geo = rendering.MaterialRecord()
+        self.lit_geo.shader = "defaultUnlit"
+
+        self.specular_geo = rendering.MaterialRecord()
+        self.specular_geo.shader = "defaultLit"
 
 
         '''
@@ -135,28 +144,18 @@ class Viewer:
         self.widget3d.scene.show_axes(False)
 
         self.widget3d_width_ratio = 1.0
-        self.widget3d_width = self.window.size.width
+        self.widget3d_width = self.window.size.width * self.widget3d_width_ratio
 
-        print("here1")
 
         """
         For visualize 3DGS ellipsoids
         """
-        self.g_camera = util.Camera(h=self.HEIGHT, w=self.WIDTH)
-        self.window_gl = None
+        self.g_camera = None
+        self.window_gl  = None
         self.g_renderer = None
-
-        gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glEnable(gl.GL_DEPTH_TEST)
-        gl.glDepthFunc(gl.GL_LEQUAL)
-
-        print("here2")
+        self.render_img = None
 
         # get current camera view
-        (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
-
-        print("here3")
-
         W2C = np.array(
                         [[-9.43868041e-01,  2.80348748e-01,  1.74693331e-01, -1.74692627e-02],
                         [-2.82218784e-01, -9.59239423e-01,  1.45645794e-02, -1.45645207e-03],
@@ -173,27 +172,23 @@ class Viewer:
         viewpoint = frustum.view_dir
         self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
 
-        print("here4")
-
-        print("here5")
 
         # a thread that helps to update view-control
         self.is_done = False
         threading.Thread(target=self._update_thread).start()
 
-        print("here6")
-
         app.run()
-        glfw.terminate()
 
 
-    def init_glfw(self, width, height):
-        window_name = "headless rendering"
+
+    def init_glfw(self):
+        window_name = ""
         if not glfw.init():
             exit(1)
-        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+        # glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+        glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
         window = glfw.create_window(
-            width, height, window_name, None, None
+            self.WIDTH, self.HEIGHT, window_name, None, None
         )
         glfw.make_context_current(window)
         glfw.swap_interval(0)
@@ -251,43 +246,46 @@ class Viewer:
 
 
     def _update_thread(self):
+        # This is NOT the UI thread, need to call post_to_main_thread() to update the scene or any part of the UI.
 
         # create glfw context at update thread
-        # HEIGHT, WIDTH = int(self.window.size.height), int(self.widget3d_width*self.widget3d_width_ratio)
-        # self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
-        # self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
-        # glfw.make_context_current(self.window_gl)
+        self.g_camera = util.Camera(h=self.HEIGHT, w=self.WIDTH)
+        self.window_gl  = self.init_glfw()
+        self.g_renderer = OpenGLRenderer(self.g_camera.w, self.g_camera.h)
 
-        # This is NOT the UI thread, need to call post_to_main_thread() to update
-        # the scene or any part of the UI.
-        while True:
+        gl.glEnable(gl.GL_TEXTURE_2D)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glDepthFunc(gl.GL_LEQUAL)
+
+        while not self.is_done:
+            
             time.sleep(0.01)
-            if self.is_done:
-                o3d.visualization.gui.Application.instance.quit()
-                time.sleep(0.01)
-                break
 
-
-            (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()
-            print(f"\ncurrent view info:")
-            print(f"\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}")
-            print(f"\tW2C:\n{W2C}")
-            
-            # ## compute_Gaussian_background here:
-            self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
-            
-            # plt.imshow(self.render_img)
-            # plt.show()  
+            # compute_Gaussian_background here (update thread)
+            if not glfw.window_should_close(self.window_gl):                
+                (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()                
+                self.render_img = self.render_o3d_image(W2C, FoVy, H, W)
+                print(f"\ncurrent view info:\n\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}\n\tW2C:\n{W2C}")
 
             # Update the images. This must be done on the UI thread.
             def update():
-                # print(f"size of rendered image ==== = {self.render_img}")
                 self.widget3d.scene.set_background([0, 0, 0, 1], self.render_img)                
-                time.sleep(0.01)
                 self.save_figure()
+                time.sleep(0.001)
 
-            gui.Application.instance.post_to_main_thread(self.window, update)
-                        
+            if self.render_img is not None:
+                gui.Application.instance.post_to_main_thread(self.window, update)
+
+
+        print(f"self.is_done = {self.is_done}")
+        # glfw.set_window_should_close(self.window_gl, glfw.TRUE)        
+        # glfw.destroy_window(self.window_gl)
+        # time.sleep(0.01)
+        glfw.terminate()
+        o3d.visualization.gui.Application.instance.quit()
+        time.sleep(0.01)
+        
+
 
 
     def save_figure(self):
@@ -351,61 +349,66 @@ class Viewer:
 
 
     def render_o3d_image(self, W2C, FoVy, HEIGHT, WIDTH):
-
-        self.window_gl  = self.init_glfw(WIDTH, HEIGHT)
-        # glfw.make_context_current(self.window_gl)
-
-        w = int(WIDTH * self.widget3d_width_ratio)
-        # glfw.set_window_size(self.window_gl, w, HEIGHT)
-
-        self.g_renderer = render_ogl.OpenGLRenderer(WIDTH, HEIGHT)
-
-        # self.g_camera.update_resolution(HEIGHT, WIDTH)
-        # self.g_renderer.set_render_reso(WIDTH, HEIGHT)        
-        
-        
         glfw.poll_events()
-        gl.glClearColor(0, 0, 0, 1.0)
+        gl.glClearColor(1.0, 1.0, 1.0, 1.0)
         gl.glClear(
             gl.GL_COLOR_BUFFER_BIT
             | gl.GL_DEPTH_BUFFER_BIT
             | gl.GL_STENCIL_BUFFER_BIT
         )
 
+        w = int(self.window.size.width * self.widget3d_width_ratio)
+        h = int(self.window.size.height)
 
-        C2W = np.linalg.inv(W2C)
-        frustum = create_frustum( C2W )
+        # print(f"w = {w}, h = {h}")
+        glfw.set_window_size(self.window_gl, w, h)
 
         self.g_camera.fovy = FoVy
-        self.g_camera.update_resolution(height=HEIGHT, width=w)
-        self.g_renderer.set_render_reso(w, HEIGHT)
+        self.g_camera.update_resolution(h, w)
 
-        # frustum = create_frustum(
-        #                 np.linalg.inv(cv_gl @ self.widget3d.scene.camera.get_view_matrix())
-        #             )
+        frustum = create_frustum(
+            np.linalg.inv(cv_gl @ self.widget3d.scene.camera.get_view_matrix())
+        )
+
+        # C2W = np.linalg.inv(W2C)
+        # frustum = create_frustum( C2W )
 
         self.g_camera.position = frustum.eye.astype(np.float32)
         self.g_camera.target = frustum.center.astype(np.float32)
         self.g_camera.up = frustum.up.astype(np.float32)
 
         self.update_activated_renderer_state(self.gaussians_gl)
-        self.g_renderer.set_render_reso(w, HEIGHT)
-
+        
         self.g_renderer.sort_and_update(self.g_camera)
         width, height = glfw.get_framebuffer_size(self.window_gl)
+        gl.glViewport(0, 0, width, height) # Viewport decided by buffer size, not window size. They're not always the same, tested on Mac wher buffer size is twice larger than frame size
+        # print(f"frame buffer size: width = {width}, height = {height}")
 
         self.g_renderer.draw()
+
+        '''
+            https://stackoverflow.com/questions/12157646/how-to-render-offscreen-on-opengl
+        '''
+        gl.glReadBuffer(gl.GL_BACK)
         bufferdata = gl.glReadPixels(
             0, 0, width, height, gl.GL_RGB, gl.GL_UNSIGNED_BYTE
         )
         img = np.frombuffer(bufferdata, np.uint8, -1).reshape(height, width, 3)
         img = cv2.flip(img, 0)
-        render_img = o3d.geometry.Image(img)
+
+        if img is not None:
+            # print(f"self.rendered_imgage: {img.shape}")
+            self.render_img = o3d.geometry.Image(img)
+        else:
+            self.render_img = None
+
         glfw.swap_buffers(self.window_gl)
+        gl.glFinish()
+        time.sleep(0.001)
 
-        glfw.terminate()
-
-        return render_img
+        return self.render_img
+        
+        
 
 
     def update_activated_renderer_state(self, gaus):
