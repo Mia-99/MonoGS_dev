@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 from gaussian_splatting.utils.graphics_utils import fov2focal, getWorld2View2
 
 import torch
+import rich
 
 
 
@@ -83,7 +84,7 @@ class Viewer:
         D            : Take a depth capture.
         O            : Take a capture of current rendering settings.   
     '''
-    def __init__(self, viewpoint_stack = None, gaussians_gl = None, pose_vis_opts = 2):        
+    def __init__(self, viewpoint_stack = None, gaussians_gl = None, pose_vis_opts = 2, view_pose_W2C = None, width = None, height=None):        
 
         app = o3d.visualization.gui.Application.instance
         app.initialize()
@@ -102,6 +103,8 @@ class Viewer:
         '''
 
         self.WIDTH, self.HEIGHT = 1200, 800
+        if (width is not None) and (height is not None):
+            self.WIDTH, self.HEIGHT = width, height
 
         self.window = gui.Application.instance.create_window ( "viewer: figure saved automatically", width=self.WIDTH, height=self.HEIGHT )
         self.window.set_on_layout(self._on_layout)
@@ -148,6 +151,15 @@ class Viewer:
         self.widget3d_width = self.window.size.width * self.widget3d_width_ratio
 
 
+        # set the position and orientation of the camera in case the view is user defined
+        if view_pose_W2C is not None:
+            C2W = np.linalg.inv(view_pose_W2C)
+            frustum = create_frustum( C2W )
+            viewpoint = frustum.view_dir
+            self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
+
+
+
         """
         For visualize 3DGS ellipsoids
         """
@@ -155,24 +167,6 @@ class Viewer:
         self.window_gl  = None
         self.g_renderer = None
         self.render_img = None
-
-        # get current camera view
-        W2C = np.array(
-                        [[-9.43868041e-01,  2.80348748e-01,  1.74693331e-01, -1.74692627e-02],
-                        [-2.82218784e-01, -9.59239423e-01,  1.45645794e-02, -1.45645207e-03],
-                        [ 1.71655729e-01, -3.55546921e-02,  9.84515131e-01,  5.70783520e+00],
-                        [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  1.00000000e+00]]
-        )
-        W = 600
-        H = 400
-        FoVy = 0.7853981633974483
-
-        # set the camera view-control in case the view is user defined
-        C2W = np.linalg.inv(W2C)
-        frustum = create_frustum( C2W )
-        viewpoint = frustum.view_dir
-        self.widget3d.look_at(viewpoint[0], viewpoint[1], viewpoint[2])
-
 
         # a thread that helps to update view-control
         self.is_done = False
@@ -267,7 +261,7 @@ class Viewer:
             if not glfw.window_should_close(self.window_gl):                
                 (W2C, FoVx, FoVy, fx, fy, cx, cy, H, W) = self.get_current_cam()                
                 self.render_img = self.render_gaussian_background_by_opengl(W2C, FoVy, H, W)
-                print(f"\ncurrent view info:\n\tWIDTH = {W}, HEIGHT = {H}, FoVy = {FoVy}\n\tW2C:\n{W2C}")
+                rich.print(f"\ncurrent view info:\n\tWIDTH = {W}\n\tHEIGHT = {H}\n\tW2C = np.{repr(W2C)}")
 
             # Update the images. This must be done on the UI thread.
             def update():
@@ -421,7 +415,6 @@ class Viewer:
 
 
 
-
 def read_camera_json (json_file_path):
     """
     {"id": 0, "img_name": "IMG_6292", "width": 1332, "height": 876, "position": [-1.4759880629577484, 1.6090724813669521, -2.7727036587765035], "rotation": [[0.5408209248789425, -0.8404510054983934, -0.03398285699915072], [0.003746154845639685, 0.042807333797130434, -0.999076322658611], [0.8411294154510098, 0.540194075800467, 0.026299561462536303]], "fy": 1034.9718637370904, "fx": 1035.4965990500061}
@@ -467,8 +460,18 @@ def main():
     cam_infos = read_camera_json (camera_file_path)
     gaussians_gl = util_gau.load_ply(point_cloud_file_path)
 
+    WIDTH = 1321
+    HEIGHT = 818
+    W2C = np.array([[ 0.98915207, -0.08082924, -0.12265864, -0.3948226 ],
+    [ 0.08723773,  0.99504024,  0.04779924, -0.85472399],
+    [ 0.1181867 , -0.05798113,  0.99129713,  3.59042859],
+    [ 0.        ,  0.        ,  0.        ,  1.        ]])
+    
 
-    Fig = Viewer(viewpoint_stack=cam_infos,  gaussians_gl= gaussians_gl)
+    Fig = Viewer(viewpoint_stack=cam_infos,  gaussians_gl= gaussians_gl,
+                 width=WIDTH, height=HEIGHT, view_pose_W2C=W2C)
+
+
 
 
 if __name__ == "__main__":
