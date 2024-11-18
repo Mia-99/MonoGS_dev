@@ -379,6 +379,7 @@ class Viewer:
         width, height = glfw.get_framebuffer_size(self.window_gl)
         gl.glViewport(0, 0, width, height) # Viewport decided by buffer size, not window size. They're not always the same, tested on Mac wher buffer size is twice larger than frame size
         # print(f"frame buffer size: width = {width}, height = {height}")
+        # gl.glScissor(0, 0, width, height)
 
         self.g_renderer.draw()
 
