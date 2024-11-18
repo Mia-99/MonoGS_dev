@@ -86,16 +86,17 @@ class Viewer:
     '''
     def __init__(self, viewpoint_stack = None, gaussians_gl = None, pose_vis_opts = 2, view_pose_W2C = None, width = None, height=None):        
 
+        self.g_scale_modifier = 1.0
+        self.camera_size = 0.1
+
+        self.render_mode = -1 # -1,  4
+
+
         app = o3d.visualization.gui.Application.instance
         app.initialize()
 
         self.viewpoint_stack = viewpoint_stack
         self.gaussians_gl = gaussians_gl
-
-        self.g_scale_modifier = 1.0
-        self.camera_size = 0.1
-
-        self.render_mode = -1 # -1,  4
 
         '''
             Open3D Visualizer Example
@@ -180,9 +181,13 @@ class Viewer:
         window_name = ""
         if not glfw.init():
             exit(1)
-        # glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         glfw.window_hint(glfw.DECORATED, glfw.TRUE)
         glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
+        glfw.window_hint(glfw.AUTO_ICONIFY, glfw.FALSE)
+        glfw.window_hint(glfw.FOCUSED, glfw.FALSE)
+        glfw.window_hint(glfw.FOCUS_ON_SHOW, glfw.FALSE)        
+        glfw.window_hint(glfw.HOVERED, glfw.FALSE)
+        # glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         window = glfw.create_window(
             self.WIDTH, self.HEIGHT, window_name, None, None
         )
@@ -191,6 +196,8 @@ class Viewer:
         if not window:
             glfw.terminate()
             exit(1)
+        glfw.set_window_opacity(window, 0.8)
+        glfw.set_window_pos(window, -2000, -2000)
         return window
 
 
@@ -253,6 +260,16 @@ class Viewer:
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glDepthFunc(gl.GL_LEQUAL)
 
+
+        # use another offscreen buffer
+        # fbo = gl.glGenFramebuffers(1)
+        # render_buf = gl.glGenRenderbuffers(1)
+        # gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, render_buf)
+        # gl.glRenderbufferStorage(gl.GL_RENDERBUFFER, gl.GL_RGB, self.WIDTH, self.HEIGHT)
+        # gl.glBindFramebuffer(gl.GL_DRAW_FRAMEBUFFER, fbo)
+        # gl.glFramebufferRenderbuffer(gl.GL_DRAW_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_RENDERBUFFER, render_buf)
+        # gl.glBindFramebuffer(gl.GL_READ_FRAMEBUFFER, fbo)
+
         while not self.is_done:
             
             time.sleep(0.015)
@@ -273,13 +290,16 @@ class Viewer:
                 gui.Application.instance.post_to_main_thread(self.window, update)
 
 
-        print(f"self.is_done = {self.is_done}")
-        # glfw.set_window_should_close(self.window_gl, glfw.TRUE)        
-        # glfw.destroy_window(self.window_gl)
-        # time.sleep(0.01)
+        # use another offscreen buffer
+        # gl.glDeleteFramebuffers(1,fbo)
+        # gl.glDeleteRenderbuffers(1, render_buf)
+        # gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+
+
+        glfw.set_window_should_close(self.window_gl, glfw.TRUE)        
+        glfw.destroy_window(self.window_gl)
         glfw.terminate()
         o3d.visualization.gui.Application.instance.quit()
-        time.sleep(0.01)
         
 
 
@@ -346,12 +366,14 @@ class Viewer:
 
     def render_gaussian_background_by_opengl(self, W2C, FoVy, HEIGHT, WIDTH):
         glfw.poll_events()
-        gl.glClearColor(0.0, 0.0, 0.0, 1.0)
+        gl.glClearColor(0.0, 0.0, 0.0, 1.0) # black
+        # gl.glClearColor(1.0, 1.0, 1.0, 1.0) # white
         gl.glClear(
             gl.GL_COLOR_BUFFER_BIT
             | gl.GL_DEPTH_BUFFER_BIT
             | gl.GL_STENCIL_BUFFER_BIT
         )
+        gl.glColorMask(gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE, gl.GL_TRUE)
 
         w = int(self.window.size.width * self.widget3d_width_ratio)
         h = int(self.window.size.height)
@@ -386,18 +408,19 @@ class Viewer:
         '''
             https://stackoverflow.com/questions/12157646/how-to-render-offscreen-on-opengl
         '''
-        gl.glReadBuffer(gl.GL_BACK)
+        #### gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0) # additional fbo buffer
         bufferdata = gl.glReadPixels(
             0, 0, width, height, gl.GL_RGB, gl.GL_UNSIGNED_BYTE
         )
         img = np.frombuffer(bufferdata, np.uint8, -1).reshape(height, width, 3)
+        img = ( img * 0.5 ).astype(np.uint8) # alpha = 0.5
         img = cv2.flip(img, 0)
 
         # print(f"self.rendered_imgage: {img.shape}")
         self.render_img = o3d.geometry.Image(img)
 
-        glfw.swap_buffers(self.window_gl)
-        gl.glFinish()
+        # glfw.swap_buffers(self.window_gl)
+        # gl.glFinish()
         time.sleep(0.001)
 
         return self.render_img
