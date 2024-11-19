@@ -115,6 +115,43 @@ def load_gs_model(file_path):
 
 def load_pose(file_path):
     pass
+
+def calculate_psnr(render_path, gt_path):
+    def get_image(path):
+        device = "cuda:0"
+        dtype = torch.float32
+        image = np.array(Image.open(path))
+        image = (
+            torch.from_numpy(image / 255.0)
+            .clamp(0.0, 1.0)
+            .permute(2, 0, 1)
+            .to(device=device, dtype=dtype)
+        )
+        return image
+
+    cal_lpips = LearnedPerceptualImagePatchSimilarity(
+                net_type="alex", normalize=True
+            ).to("cuda")
+    gt_image = get_image(gt_path)
+    render_image = get_image(render_path)
+
+    image = torch.clamp(render_image, 0.0, 1.0)
+    # save image
+    gt = (gt_image.cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
+    gt = cv2.cvtColor(gt, cv2.COLOR_BGR2RGB)
+    pred = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
+    pred = cv2.cvtColor(pred, cv2.COLOR_RGB2BGR)
+
+    mask = gt_image > 0
+    psnr_score = psnr((image[mask]).unsqueeze(0), (gt_image[mask]).unsqueeze(0))
+    ssim_score = ssim((image).unsqueeze(0), (gt_image).unsqueeze(0))
+    lpips_score = cal_lpips((image).unsqueeze(0), (gt_image).unsqueeze(0))
+
+    print("psnr: ", psnr_score.item())
+    print("ssim: ", ssim_score.item())
+    print("lpips: ", lpips_score.item())
+    pass
+
 class Experiment():
     def __init__(self, path):
         self.path = path
@@ -368,7 +405,7 @@ class Experiment():
                         'lpips_array': lpips_array
                     }, file)
                 return rendering
-    
+
     def pre_plot(self):
         self.load_config()
         self.load_pose()
@@ -465,7 +502,7 @@ class Results():
                     data = experiment.load_data()
                     self.data[img_type][seq][sub_seq][time] = data
                     if gaussians is not None:
-                        experiment.render()
+                        # experiment.render()
                         # experiment.plot()
                         pass
     
@@ -675,13 +712,13 @@ if __name__ == "__main__":
 
 
     # img_types = ['mono']
-    datasets = ['replica_small']
-    sequence = ['o0','o1', 'o2','o3','o4']
-    # sequence = ['o3']
-    # results = Results(datasets, img_types, sequence)
+    # datasets = ['replica_small']
+    # sequence = ['o0','o1', 'o2','o3','o4']
+    sequence = ['o4']
+    results = Results(datasets, img_types, sequence)
     # tables = results.tracking_latex_table()
     # tables = results.rendering_latex_table()
-    # tables = results.total_latex_table()
+    tables = results.total_latex_table()
     # a = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office0/2024-10-24-10-04-59')
     # a = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office3/2024-11-09-22-26-48')
     # # a.render()
@@ -692,13 +729,24 @@ if __name__ == "__main__":
     # ours.pre_plot()
     # gsslam.pre_plot()
     # ours = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small_cali/office0_v6/2024-11-09-11-57-25')
-    ours = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office1_1000/2024-11-09-21-01-20')
-    ours.compare_ply()
+    # ours = Experiment('/workspaces/src/MonoGS_dev/results/monocular/replica_small/office1_1000/2024-11-09-21-01-20')
+    # ours.compare_ply()
     # ours.pre_plot()
     # plot_traj_focal(ours, ours_no_cali, gsslam)
-    
 
-
+    # dir = "/datasets/after_opt+gt/"
+    # # read txt
+    # with open(dir + "frame_id.txt", "r") as file:
+    #     # remove \n at the end of each line
+    #     gt = [line.strip() for line in file]
+    # for indx in gt:
+    #     render_img_path = dir + "after_opt/" + f"render_{indx}.png"
+    #     gt_img_path = dir + "gt/" + f"frame{int(indx):06d}.jpg"
+    #     # if file exists
+    #     if os.path.exists(render_img_path):
+    #         print(indx)
+    #         calculate_psnr(render_img_path, gt_img_path)
+        
 
     
     pass
