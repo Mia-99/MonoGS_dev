@@ -18,6 +18,7 @@ import gtsam
 #                    Marginals, NonlinearFactorGraph, PinholeCameraCal3_S2,
 #                    PriorFactorPoint3, PriorFactorPose3, Values)
 
+# from gtsam.Values import Values
 
 from gtsam.examples import SFMdata
 from gtsam.utils import plot
@@ -25,21 +26,32 @@ from gtsam.utils import plot
 
 
 
-
-
-
-def bundle_adjustment(kpt_measurement, poses, points, K):
+def bundle_adjustment(kpt_measurements, poses_c2w, points, K, compute_marginals = False):
     """
         Parameters:
-            kpt_measurement ({{}}):  [i][j] = np.ndarray 2D keypoint position of j-th landmark in i-th pose
-            poses   ([np.ndarray]):  [i] = i-th pose
-            points  ([np.ndarray]):  [j] = j-th point
-            K         (np.ndarray):  shape(3,3). calibration intrinsic matrix
+            kpt_measurements   ({{}}):  [i][j] = np.ndarray 2D keypoint position of j-th landmark in i-th pose
+            poses      ([np.ndarray]):  [i] = i-th pose   : C2W (from camera to world)
+            points     ([np.ndarray]):  [j] = j-th point
+            K            (np.ndarray):  shape(3,3). calibration intrinsic matrix
 
         Returns:
-            graph                 :  gtsam.NonlinearFactorGraph()
-            result                :  gtsam.Values()
-            
+            opt_poses  ([np.ndarray]):  [i] = i-th pose   : C2W (from camera to world)
+            opt_points ([np.ndarray]):  [j] = j-th point
+
+        Remarks:
+            graph                   :  gtsam.NonlinearFactorGraph()
+            result                  :  gtsam.Values()
+
+            PoseDirection           : From Camera to World
+
+                Code to project from World to Camera
+
+                    // gtsam/gtsam/geometry/CalibratedCamera.cpp
+                    const Point3 q = pose().transformTo(point)
+
+                    // gtsam/gtsam/geometry/Pose3.cpp
+                    const Matrix3 Rt = R_.transpose();
+                    const Point3 q(Rt*(point - t_));
     """
 
     L = gtsam.symbol_shorthand.L
@@ -57,11 +69,11 @@ def bundle_adjustment(kpt_measurement, poses, points, K):
     # Define the camera observation noise model
     measurement_noise = gtsam.noiseModel.Isotropic.Sigma(2, 1.0)  # one pixel in u and v
 
-    # Simulated measurements from each camera pose, adding them to the factor graph
+    # measurements from each camera pose, adding them to the factor graph
     for i, pose in enumerate(poses):
-        camera = gtsam.PinholeCameraCal3_S2(pose, K)
+        # camera = gtsam.PinholeCameraCal3_S2(pose, K)
         for j, point in enumerate(points):
-            measurement = kpt_measurement[i][j]
+            measurement = kpt_measurements[i][j]
             factor = gtsam.GenericProjectionFactorCal3_S2(measurement, measurement_noise, X(i), L(j), K)
             graph.push_back(factor)
 
@@ -95,9 +107,23 @@ def bundle_adjustment(kpt_measurement, poses, points, K):
     print("\tinitial error = {}".format(graph.error(initial_estimate)))
     print("\tfinal error   = {}".format(graph.error(result)))
 
-    return graph, result
+    if compute_marginals:
+        # mariginal covariance
+        marginals = gtsam.Marginals(graph, result)
+        plot.plot_3d_points(1, result, marginals=marginals)
+        plot.plot_trajectory(1, result, marginals=marginals, scale=8)
+        plot.set_axes_equal(1)
+        plt.show()
 
+    # extract arrays
+    opt_poses_c2w, opt_points = [], []
+    for i in range( len(poses) ):
+        opt_poses_c2w.append( result.atPose3 ( X(i) ).matrix() )   # [ [R, t],  [0,0,0,1] ]. #numpy.ndarray, shape(4,4)
 
+    for j in range( len(points) ):
+        opt_points.append( result.atPoint3 ( L(j) ) )   #nnumpy.ndarray  shape(3)
+
+    return opt_poses_c2w, opt_points
 
 
 
@@ -141,28 +167,19 @@ if __name__ == "__main__":
     poses = SFMdata.createPoses(K )
 
     # Simulated measurements from each camera pose, adding them to the factor graph
-    kpt_measurement = {}
+    kpt_measurements = {}
     for i, pose in enumerate(poses):
-        kpt_measurement[i] = {}
+        kpt_measurements[i] = {}
         camera = gtsam.PinholeCameraCal3_S2(pose, K)
         for j, point in enumerate(points):
             measurement = camera.project(point)
-            kpt_measurement[i][j] = measurement
+            kpt_measurements[i][j] = measurement
             print(f" measurement ({i}, {j}) = {measurement}, {type(measurement)}")
 
-
-    print(f"type(points) = {type(points)}")
-    print(f"type(poses) = {type(poses)}")
-    print(f"type(kpt_measurement) = {type(kpt_measurement)}")
-
     # perform BA with given calibration K
-    (graph, result) = bundle_adjustment(kpt_measurement, poses, points, K)
-
-    # mariginal covariance
-    marginals = gtsam.Marginals(graph, result)
+    opt_poses, opt_points = bundle_adjustment(kpt_measurements, poses, points, K)
 
 
-    plot.plot_3d_points(1, result, marginals=marginals)
-    plot.plot_trajectory(1, result, marginals=marginals, scale=8)
-    plot.set_axes_equal(1)
-    plt.show()
+
+
+
