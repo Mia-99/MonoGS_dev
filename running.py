@@ -3,31 +3,7 @@ import os
 
 # Base command
 # types=['mono', 'rgbd']
-# seqs = ["0", "1", "2", "3", "4"]
-# versions = ['', '_v0_sp', '_v0', '_v1_sp', '_v1', '_v2_sp', '_v2', '_v3_sp', '_v3', '_v4_sp', '_v4', '_v5_sp', '_v5', '_v6_sp', '_v6', '_v7', '_v8']
-
-
 types=['mono']
-# types=['rgbd']
-# seqs = ["0"]
-# versions = ['_v6_sp', '_v6']
-# seqs = ["1"]
-# versions = ['_v0_sp', '_v0']
-# seqs = ["3"]
-# versions = ['_v9_sp', '_v9']
-# seqs = ["4"]
-# versions = ['_v0_sp', '_v0']
-
-# versions = ['_300','_400','_500','_600','_700','_800']
-# versions = ['_400_sp','_500_sp','_600_sp']
-# versions = ['_500']
-# data_dict = {
-#     # "0": ["_v6_sp", "_v6"],
-#     "1": ["_v0_sp", "_v0"],
-#     "2": ["_v3_sp", "_v3"],
-#     "3": ["_v9_sp", "_v9"],
-#     # "4": ["_v0_sp", "_v0"]
-# }
 # data_dict = {
 #     "0": ["_v6",''],
 #     "1": ["_v0",''],
@@ -36,21 +12,8 @@ types=['mono']
 #     "4": ["_v0",'']
 # }
 data_dict = {
-    "0": ["_300400_1_50","_300400_1_100","_300400_1_150","_300400_1_200","_300400_1_250","_300400_1_300","_300400_1_350","_300400_1_400","_300400_1_450","_300400_1_500","_300400_1_550","_300400_1_600","_300400_1_650","_300400_1_700"],
-    # "1": ["_v0",'','_sp'],
-    # "1": ['_v0','_v0_sp'],
-    # "2": ["_v3_sp", "_v3"],
-    # "3": ["_v1",'','_sp'],
-    # "4": ['_v0_sp', '_v0']
+    "0": ['_640480_300', '_640480_400', '_640480_510', '_640480_560', '_640480_600', '_640480_700', '_640480_800']
 }
-# data_dict = {
-#     # "0": [""],
-#     # "1": [""],
-#     "2": [""],
-#     "3": [""],
-#     "4": [""]
-# }
-# Loop through each version and run the command
 
 for type in types:
     # for seq in seqs:
@@ -65,19 +28,46 @@ for type in types:
             # if there is config file
             config_file_path = f'./configs/{type}/{dataset}/{config_file}'
             print(f"config_file_path: {config_file_path}")
-            if os.path.exists(config_file_path):
-                # mkdire output folder
-                os.makedirs(f'./cmd_output/office{seq}', exist_ok=True)
-                output_file = f'./cmd_output/office{seq}/office{seq}_{version}.txt'
+            # if os.path.exists(config_file_path):
+            #     # mkdire output folder
+            #     os.makedirs(f'./cmd_output/office{seq}', exist_ok=True)
+            #     output_file = f'./cmd_output/office{seq}/office{seq}_{version}.txt'
+            #     if dataset == 'replica_small_cali' and type == 'rgbd':
+            #         base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration | tee {output_file}"
+            #         command = base_command.format(config_file=config_file, output_file=output_file)
+                
+            #     # Run the command
+            #         print(f"Running: {command}")
+            #         os.system(command)
+            #         base_command = f"python slam_cali.py --config {config_file_path} --eval"
+            #         command = base_command.format(config_file=config_file, output_file=output_file)
+                
+            #     # Run the command
+            #         print(f"Running: {command}")
+            #         os.system(command)
+            #     if dataset == 'replica_small' and type == 'rgbd':
+            #         base_command = f"python slam_cali.py --config {config_file_path} --eval"
+            #         command = base_command.format(config_file=config_file, output_file=output_file)
+                
+            #     # Run the command
+            #         print(f"Running: {command}")
+            #         os.system(command)                
+            #     if dataset == 'replica_small_cali' and type == 'mono':
+            #         base_command = f"python slam_cali.py --config {config_file_path} --eval"
+            #         command = base_command.format(config_file=config_file, output_file=output_file)
+                
+                # # Run the command
+                #     print(f"Running: {command}")
+                #     os.system(command)
                 # base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration --allow_lens_distortion | tee {output_file}"
-                # base_command = f"python slam_cali.py --config {config_file_path} --eval --require_calibration | tee {output_file}"
-                base_command = f"python slam_cali.py --config {config_file_path} --eval"
-                
-                # Construct the full command
-                command = base_command.format(config_file=config_file, output_file=output_file)
-                
-                # Run the command
-                print(f"Running: {command}")
-                os.system(command)
+            base_command = f"python slam_cali.py --config {config_file_path} --eval"
+            # base_command = f"python slam_cali.py --config {config_file_path} --eval"
+            
+            # Construct the full command
+            command = base_command.format(config_file=config_file)
+            
+            # # Run the command
+            print(f"Running: {command}")
+            os.system(command)
 
 print("All done!")
