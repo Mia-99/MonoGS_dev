@@ -29,7 +29,7 @@ import random
 import numpy as np
 
 import pickle
-
+from pympler import asizeof
 # python slam_cali.py --config configs/mono/replica_cali/office4_sp.yaml --eval --require_calibration --allow_lens_distortion | tee output.txt
 
 class OnlineCalibrationSettings:
@@ -169,7 +169,8 @@ class SLAM:
                 final=True,
                 monocular=self.monocular,
             )
-
+            print("size of cameras: ", asizeof.asizeof(self.frontend.cameras))
+            Log("Number of Gaussians: {}".format(self.gaussians.get_xyz.shape[0]))
             rendering_result = eval_rendering(
                 self.frontend.cameras,
                 self.gaussians,
@@ -225,6 +226,8 @@ class SLAM:
             )
             wandb.log({"Metrics": metrics_table})
             save_gaussians(self.gaussians, self.save_dir, "final_after_opt", final=True)
+            # print the number of gaussians
+            Log("Number of Gaussians: {}".format(self.gaussians.get_xyz.shape[0]))
             # save gaussians class
             save_gaussians_class(self.save_dir, self.gaussians)
             save_cali(self.save_dir, self.frontend.cameras, self.frontend.kf_indices, N_frames)
