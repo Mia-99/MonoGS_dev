@@ -26,36 +26,40 @@ from gtsam.utils import plot
 
 
 
-def bundle_adjustment(kpt_measurements, poses_c2w, points, K, compute_marginals = False):
+def bundle_adjustment(kpt_measurements, poses_w2c, points, K, compute_marginals = False, plot_figure = False):
     """
         Parameters:
             kpt_measurements   ({{}}):  [i][j] = np.ndarray 2D keypoint position of j-th landmark in i-th pose
-            poses      ([np.ndarray]):  [i] = i-th pose   : C2W (from camera to world)
-            points     ([np.ndarray]):  [j] = j-th point
+            poses      ({np.ndarray}):  [i] = i-th pose   : W2C (from world to camera)
+            points     ({np.ndarray}):  [j] = j-th point
             K            (np.ndarray):  shape(3,3). calibration intrinsic matrix
 
         Returns:
-            opt_poses  ([np.ndarray]):  [i] = i-th pose   : C2W (from camera to world)
-            opt_points ([np.ndarray]):  [j] = j-th point
+            opt_poses  ({np.ndarray}):  [i] = i-th pose   : W2C (from world to camera)
+            opt_points ({np.ndarray}):  [j] = j-th point
 
         Remarks:
             graph                   :  gtsam.NonlinearFactorGraph()
             result                  :  gtsam.Values()
-
-            PoseDirection           : From Camera to World
-
-                Code to project from World to Camera
-
-                    // gtsam/gtsam/geometry/CalibratedCamera.cpp
-                    const Point3 q = pose().transformTo(point)
-
-                    // gtsam/gtsam/geometry/Pose3.cpp
-                    const Matrix3 Rt = R_.transpose();
-                    const Point3 q(Rt*(point - t_));
     """
 
     L = gtsam.symbol_shorthand.L
     X = gtsam.symbol_shorthand.X
+
+    fx, fy, s, u0, v0 = K[0,0], K[1,1], K[0,1], K[0,2], K[1,2]
+    intrinsic_K = gtsam.Cal3_S2(fx, fy, s, u0, v0)
+
+    # PoseDirection in GTSAM          : From Camera to World
+    # Code Pieces:
+    #         // gtsam/gtsam/geometry/CalibratedCamera.cpp
+    #         const Point3 q = pose().transformTo(point)   # from World to Camera
+    #         // gtsam/gtsam/geometry/Pose3.cpp
+    #         const Matrix3 Rt = R_.transpose();
+    #         const Point3 q(Rt*(point - t_));
+    poses_c2w = {}
+    for i, w2c in poses_w2c.items():
+        poses_c2w[i] = gtsam.Pose3( np.linalg.inv( w2c ) )
+
 
     # Create a factor graph
     graph = gtsam.NonlinearFactorGraph()
@@ -63,38 +67,36 @@ def bundle_adjustment(kpt_measurements, poses_c2w, points, K, compute_marginals 
     # Add a prior on pose x1. This indirectly specifies where the origin is.
     # 0.3 rad std on roll,pitch,yaw and 0.1m on x,y,z
     pose_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.3, 0.3, 0.3, 0.1, 0.1, 0.1]))
-    factor = gtsam.PriorFactorPose3(X(0), poses[0], pose_noise)
-    graph.push_back(factor)
+    for i, pose in poses_c2w.items():
+        factor = gtsam.PriorFactorPose3(X(i), pose, pose_noise)
+        graph.push_back(factor)
+        break
 
     # Define the camera observation noise model
     measurement_noise = gtsam.noiseModel.Isotropic.Sigma(2, 1.0)  # one pixel in u and v
 
     # measurements from each camera pose, adding them to the factor graph
-    for i, pose in enumerate(poses):
-        # camera = gtsam.PinholeCameraCal3_S2(pose, K)
-        for j, point in enumerate(points):
-            measurement = kpt_measurements[i][j]
-            factor = gtsam.GenericProjectionFactorCal3_S2(measurement, measurement_noise, X(i), L(j), K)
+    for i, kpt_measurements_per_image in kpt_measurements.items():
+        for j, measurement in kpt_measurements_per_image.items():
+            factor = gtsam.GenericProjectionFactorCal3_S2(measurement, measurement_noise, X(i), L(j), intrinsic_K)
             graph.push_back(factor)
 
     # Because the structure-from-motion problem has a scale ambiguity, the problem is still under-constrained
     # Here we add a prior on the position of the first landmark. This fixes the scale by indicating the distance
     # between the first camera and the first landmark. All other landmark positions are interpreted using this scale.
     point_noise = gtsam.noiseModel.Isotropic.Sigma(3, 0.1)
-    factor = gtsam.PriorFactorPoint3(L(0), points[0], point_noise)
-    graph.push_back(factor)
+    for j, point in points.items():
+        factor = gtsam.PriorFactorPoint3(L(j), gtsam.Point3(point), point_noise)
+        graph.push_back(factor)
+        break
     # graph.print("Factor Graph:\n")
 
     # Create the data structure to hold the initial estimate to the solution
-    # Intentionally initialize the variables off from the ground truth
     initial_estimate = gtsam.Values()
-    # rng = np.random.default_rng()
-    for i, pose in enumerate(poses):
-        transformed_pose = pose   # .retract(0.1 * rng.standard_normal(6).reshape(6, 1))
-        initial_estimate.insert(X(i), transformed_pose)
-    for j, point in enumerate(points):
-        transformed_point = point # + 0.1 * rng.standard_normal(3)
-        initial_estimate.insert(L(j), transformed_point)
+    for i, pose in poses_c2w.items():
+        initial_estimate.insert(X(i), pose)
+    for j, point in points.items():
+        initial_estimate.insert(L(j), point)
     # initial_estimate.print("Initial Estimates:\n")
 
     # Optimize the graph and print results
@@ -107,23 +109,24 @@ def bundle_adjustment(kpt_measurements, poses_c2w, points, K, compute_marginals 
     print("\tinitial error = {}".format(graph.error(initial_estimate)))
     print("\tfinal error   = {}".format(graph.error(result)))
 
-    if compute_marginals:
-        # mariginal covariance
-        marginals = gtsam.Marginals(graph, result)
+    # mariginal covariance
+    marginals = gtsam.Marginals(graph, result) if compute_marginals else None
+    if plot_figure:
         plot.plot_3d_points(1, result, marginals=marginals)
         plot.plot_trajectory(1, result, marginals=marginals, scale=8)
         plot.set_axes_equal(1)
         plt.show()
 
     # extract arrays
-    opt_poses_c2w, opt_points = [], []
-    for i in range( len(poses) ):
-        opt_poses_c2w.append( result.atPose3 ( X(i) ).matrix() )   # [ [R, t],  [0,0,0,1] ]. #numpy.ndarray, shape(4,4)
+    opt_poses_w2c, opt_points = {}, {}
+    for i, pose in poses_c2w.items():
+        c2w = result.atPose3 ( X(i) ).matrix()      # [ [R, t],  [0,0,0,1] ]. #numpy.ndarray, shape(4,4)
+        opt_poses_w2c[i] =  np.linalg.inv( c2w )
 
-    for j in range( len(points) ):
-        opt_points.append( result.atPoint3 ( L(j) ) )   #nnumpy.ndarray  shape(3)
+    for j, point in points.items():
+        opt_points[j] =  result.atPoint3 ( L(j) )   #nnumpy.ndarray  shape(3)
 
-    return opt_poses_c2w, opt_points
+    return opt_poses_w2c, opt_points
 
 
 
@@ -158,26 +161,44 @@ if __name__ == "__main__":
     """
 
     # Define the camera calibration parameters
-    K = gtsam.Cal3_S2(50.0, 50.0, 0.0, 50.0, 50.0)
+
+    fx, fy, s, u0, v0 = 50.0, 50.0, 0.0, 50.0, 50.0
+    intrK = gtsam.Cal3_S2(fx, fy, s, u0, v0)
+    K = np.array( [ [fx, 0, u0],
+                    [0, fy, v0],
+                    [0, 0, 1  ] ] )
+
 
     # Create the set of ground-truth landmarks
     points = SFMdata.createPoints()
 
     # Create the set of ground-truth poses
-    poses = SFMdata.createPoses(K )
+    poses = SFMdata.createPoses(intrK)
 
     # Simulated measurements from each camera pose, adding them to the factor graph
     kpt_measurements = {}
     for i, pose in enumerate(poses):
         kpt_measurements[i] = {}
-        camera = gtsam.PinholeCameraCal3_S2(pose, K)
+        camera = gtsam.PinholeCameraCal3_S2(pose, intrK)
         for j, point in enumerate(points):
             measurement = camera.project(point)
             kpt_measurements[i][j] = measurement
             print(f" measurement ({i}, {j}) = {measurement}, {type(measurement)}")
 
+    # convert c2w to w2c
+    # print(poses)
+    W2C = []
+    for pose in poses:
+        T = np.linalg.inv(pose.matrix())
+        W2C.append(T)
+    # print(W2C)
+    
     # perform BA with given calibration K
-    opt_poses, opt_points = bundle_adjustment(kpt_measurements, poses, points, K)
+    opt_poses, opt_points = bundle_adjustment(kpt_measurements,
+                                              dict( enumerate(W2C) ),
+                                              dict( enumerate(points) ),
+                                              K,
+                                              True, True)
 
 
 

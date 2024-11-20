@@ -16,6 +16,11 @@ import open3d as o3d
 
 # pip install pycolmap
 class ColMap:
+    """
+    PyCOLMAP: APIs
+    https://colmap.github.io/pycolmap/index.html
+    
+    """
 
     def __init__ (self, image_dir = None):
 
@@ -58,6 +63,14 @@ class ColMap:
         # pycolmap.patch_match_stereo(mvs_path)  # requires compilation with CUDA
         # pycolmap.stereo_fusion(mvs_path / "dense.ply", mvs_path)
 
+    def getPoints3DXYZ(self):
+        points3d = {}
+        for point3D_id, point3D in self.reconstruction.points3D.items():
+            points3d[  point3D_id ] = point3D.xyz
+            if point3D.track.length() == 1:
+                print(f"point3D: id = {point3D_id}. values = {point3D}")
+        return points3d
+
 
     def getPointCloud(self):
         positions = []
@@ -82,7 +95,7 @@ class ColMap:
     # Bring a world point X_world to camera frame
     # X_cam = R * X_world  +  t
     def getCamPosedImages(self):
-        posed_image_stack = {}
+        posed_image_dict = {}
         for image_id, image in self.reconstruction.images.items():
             pose = image.cam_from_world
             qvec = pose.rotation.quat
@@ -90,8 +103,8 @@ class ColMap:
             # [ R, T ] is a tranformation from world frame to camera frame
             R = self.qvec2rotmat( qvec )
             T = np.array( tvec )
-            posed_image_stack[image_id] = (R, T, image.name, image.camera_id)
-        return posed_image_stack
+            posed_image_dict[image_id] = (R, T, image.name, image.camera_id)
+        return posed_image_dict
 
 
     def getCalibration(self):        
@@ -137,6 +150,17 @@ class ColMap:
                 sparse_depth_stack.append(value)
         return sparse_depth_stack
 
+
+
+    def getSparseKeypointsFromImage (self, image_id,  downsample_scale = 1.0):
+        scale_factor = 1.0 / downsample_scale
+        image_points = self.reconstruction.images[image_id].points2D
+        sparse_keypoints_dict = {}
+        for pt in image_points:
+            if pt.has_point3D():
+                xy_value = np.array( [ pt.xy[0]*scale_factor, pt.xy[1]*scale_factor ] )
+                sparse_keypoints_dict[ pt.point3D_id ] =  xy_value
+        return sparse_keypoints_dict
 
 
 
@@ -277,8 +301,8 @@ if __name__ == "__main__":
     calib_stack, focal0, kappa0 = reconstruction.getCalibration()
 
     # interface to 3DGS
-    pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
-    viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
+    # pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
+    # viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
 
     # sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = 1)
 
@@ -315,8 +339,8 @@ if __name__ == "__main__":
             cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=WIDTH, view_height_px=HEIGHT, intrinsic=intrinsic, extrinsic=extrinsic)
             vis.add_geometry(cameraLines)
 
-        odometryLines = create_trajectory_lineset(viewpoint_stack)
-        vis.add_geometry(odometryLines)
+        # odometryLines = create_trajectory_lineset(viewpoint_stack)
+        # vis.add_geometry(odometryLines)
 
 
         # visualize and block

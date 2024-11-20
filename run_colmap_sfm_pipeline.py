@@ -59,6 +59,10 @@ import cv2
 
 from matplot_utils import image_annotation
 
+from gtsam_utils import bundle_adjustment
+
+
+
 
 # from depth_anything import DepthAnything
 # def init_dense_pcd_from_network (viewpoint_stack, reconstruction: ColMap, num_points = 20000):
@@ -242,11 +246,38 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
 
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
-
-    colmap_posed_image_stack = reconstruction.getCamPosedImages()
-    for image_id, item in colmap_posed_image_stack.items():
+    
+    points3D_dict = reconstruction.getPoints3DXYZ()
+    sparse_keypoints_meausurements_dict = {}
+    poses_dict = {}
+    posed_image_dict = reconstruction.getCamPosedImages()
+    for image_id, item in posed_image_dict.items():
+        uid = image_id
         R, T, imgname, camera_id = item
         print(imgname)
+        sparse_keypoints_dict = reconstruction.getSparseKeypointsFromImage (image_id,  downsample_scale = downsample_scale)
+        sparse_keypoints_meausurements_dict[ image_id  ] = sparse_keypoints_dict
+        W2C = np.eye(4)
+        W2C[:3, :3] = R
+        W2C[:3, 3] = T
+        poses_dict[ image_id ] = W2C
+
+    calib_stack, avg_K, avg_kappa = reconstruction.getCalibration()
+    avg_K = avg_K  / downsample_scale
+    avg_K[2, 2] = 1.0
+    bundle_adjustment(kpt_measurements=sparse_keypoints_meausurements_dict,
+                      poses_w2c=poses_dict,
+                      points=points3D_dict,
+                      K=avg_K,
+                      compute_marginals=False, plot_figure=True)
+
+
+    sys.exit()
+
+    # perform BA with given calibration K
+    # opt_poses_c2w, opt_points = bundle_adjustment(kpt_measurements, poses_c2w, points, K)
+
+
 
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
@@ -303,7 +334,7 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
 
 
     gt_W2C_dic = {}
-    for image_id, item in colmap_posed_image_stack.items():
+    for image_id, item in posed_image_dict.items():
         uid = image_id
         R, T, imgname, camera_id = item        
         (K, pose, width, height) = read_groundtruth_camera(gt_dir + '/' + imgname + '.camera')
