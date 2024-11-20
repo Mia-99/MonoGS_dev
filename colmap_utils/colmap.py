@@ -1,15 +1,8 @@
 
-import os
 import numpy as np
 import pathlib
 import pycolmap
 
-from PIL import Image
-
-
-from gaussian_splatting.utils.graphics_utils import BasicPointCloud
-from gaussian_splatting.scene.cameras import Camera
-from gaussian_splatting.utils.general_utils import PILtoTorch
 
 import open3d as o3d
 
@@ -27,6 +20,8 @@ class ColMap:
         self.reconstruction = None
 
         self.image_dir = image_dir
+
+        self.single_cam_id = 1
 
         if image_dir is not None:
             self.run(image_dir)
@@ -47,21 +42,73 @@ class ColMap:
         mvs_path = image_dir.parent / "dense"
         mvs_path.mkdir(parents="False", exist_ok="True")
 
-        pycolmap.extract_features(database_path, image_dir)
+        '''
+        CameraMode
+        https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.CameraMode
+            AUTO= <CameraMode.AUTO: 0>
+            PER_FOLDER= <CameraMode.PER_FOLDER: 2>
+            PER_IMAGE= <CameraMode.PER_IMAGE: 3>
+            SINGLE= <CameraMode.SINGLE: 1>
+        '''
+        # print(f"camera_mode = {pycolmap.CameraMode(2)},   also = {pycolmap.CameraMode.PER_FOLDER}")
+        '''
+        ImageReaderOptions
+        https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.ImageReaderOptions
+            camera_model
+            camera_params
+            existing_camera_id: Whether to explicitly use an existing camera for all images. Note that in this case the specified camera model and parameters are ignored. (int, default: -1)
+        '''
+        # image_reader_options = pycolmap.ImageReaderOptions(existing_camera_id = 1)
+        '''
+        extract_features
+        https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.extract_features
+        '''
+        pycolmap.extract_features(database_path, image_dir,
+                                  camera_mode = pycolmap.CameraMode.SINGLE,
+                                  camera_model = 'SIMPLE_RADIAL',
+                                  reader_options = pycolmap.ImageReaderOptions(existing_camera_id = 1))
+        
+
         pycolmap.match_exhaustive(database_path)
         maps = pycolmap.incremental_mapping(database_path, image_dir, output_path)
 
         # sparse reconstruction
         self.reconstruction = maps[0]
-        self.reconstruction.write(output_path )
+        # print(self.reconstruction.summary())
+
+        # use single camera intrinsic calibration for all images
+        self.__set_to_single_camera()
+        '''
+        bundle_adjustment
+        https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.bundle_adjustment
+        '''
+        pycolmap.bundle_adjustment(self.reconstruction)
+        print(self.reconstruction.summary())
+
+        # save
+        self.reconstruction.write(output_path)
         # self.reconstruction.write_text(output_path )  # text format
         self.reconstruction.export_PLY(output_path / "points3D.ply")  # PLY format
-        print(self.reconstruction.summary())
 
         # dense reconstruction
         # pycolmap.undistort_images(mvs_path, output_path, image_dir)
         # pycolmap.patch_match_stereo(mvs_path)  # requires compilation with CUDA
         # pycolmap.stereo_fusion(mvs_path / "dense.ply", mvs_path)
+
+
+    def bundleAdjustmentByGivenCalibration (self, focal = None, kappa = None, delta_focal = None):
+        # set new camera intrinsics
+        self.__set_to_single_camera(focal=focal, kappa=kappa, delta_focal=delta_focal)
+        # Bundle Adjustment with fixed camera intrinsics
+        '''
+        BundleAdjustmentOptions
+        https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.BundleAdjustmentOptions
+        '''
+        ba_opts = pycolmap.BundleAdjustmentOptions(refine_focal_length = False, refine_extra_params = False)
+        pycolmap.bundle_adjustment(self.reconstruction, options = ba_opts)
+        return self.reconstruction
+
+
 
     def getPoints3DXYZ(self):
         points3d = {}
@@ -95,45 +142,19 @@ class ColMap:
     # Bring a world point X_world to camera frame
     # X_cam = R * X_world  +  t
     def getCamPosedImages(self):
+        calib_dict, avg_K, avg_kappa = self.__get_calibration()
         posed_image_dict = {}
         for image_id, image in self.reconstruction.images.items():
             pose = image.cam_from_world
             qvec = pose.rotation.quat
             tvec = pose.translation
             # [ R, T ] is a tranformation from world frame to camera frame
-            R = self.qvec2rotmat( qvec )
+            R = self.__qvec2rotmat( qvec )
             T = np.array( tvec )
-            posed_image_dict[image_id] = (R, T, image.name, image.camera_id)
+            (K, kappa) = calib_dict[ image.camera_id ]
+            posed_image_dict[image_id] = (R, T, image.name, K, kappa)
         return posed_image_dict
 
-
-    def getCalibration(self):        
-        calib_stack = {}
-        avg_K = np.zeros((3,3))
-        avg_kappa = 0.0
-        for camera_id, camera in self.reconstruction.cameras.items():
-            if camera.model == pycolmap.CameraModelId.SIMPLE_RADIAL:
-                fx = camera.params[0]
-                fy = camera.params[0]
-                cx = camera.params[1]
-                cy = camera.params[2]
-                kappa = camera.params[3]
-                K = np.array([[fx,  0.0, cx],
-                            [0.0, fy,  cy],
-                            [0.0, 0.0, 1.0]])
-                calib_stack[camera_id] = (K, kappa)
-                avg_K += K
-                avg_kappa += kappa
-        return calib_stack,  avg_K/len(calib_stack),  avg_kappa/len(calib_stack)
-
-
-    @staticmethod
-    # copied from 3DGS colmap.loader.py
-    def qvec2rotmat(qvec):
-        return np.array([
-            [1 - 2 * qvec[2]**2 - 2 * qvec[3]**2,   2 * qvec[1] * qvec[2] - 2 * qvec[0] * qvec[3],  2 * qvec[3] * qvec[1] + 2 * qvec[0] * qvec[2]],
-            [2 * qvec[1] * qvec[2] + 2 * qvec[0] * qvec[3],   1 - 2 * qvec[1]**2 - 2 * qvec[3]**2,  2 * qvec[2] * qvec[3] - 2 * qvec[0] * qvec[1]],
-            [2 * qvec[3] * qvec[1] - 2 * qvec[0] * qvec[2],   2 * qvec[2] * qvec[3] + 2 * qvec[0] * qvec[1],  1 - 2 * qvec[1]**2 - 2 * qvec[2]**2]])
 
 
     def getSparseDepthFromImage (self, image_id,  downsample_scale = 1.0):
@@ -161,101 +182,54 @@ class ColMap:
                 xy_value = np.array( [ pt.xy[0]*scale_factor, pt.xy[1]*scale_factor ] )
                 sparse_keypoints_dict[ pt.point3D_id ] =  xy_value
         return sparse_keypoints_dict
-
-
-
-# a function to create a list of Camera classes in 3DGS/MonoGS
-def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_calib = True):
-    camera_stack = []
-    camera_centers = []
-    calib_stack, avg_K, avg_kappa = colmap.getCalibration()
-    posed_image_stack = colmap.getCamPosedImages()
-
-    for image_id, item in posed_image_stack.items():
-        R, T, imgname, camera_id = item
-        
-        image_path = os.path.join(colmap.image_dir, os.path.basename(imgname))
-        image = Image.open(image_path)
-        # adjust image resolution if necessary
-        orig_w, orig_h = image.size
-        imgsize = round(orig_w/(downsample_scale)), round(orig_h/(downsample_scale))
-
-        resized_image_rgb = PILtoTorch(image, imgsize)
-        gt_image = resized_image_rgb[:3, ...]
-
-        image_height = gt_image.shape[1]
-        image_width = gt_image.shape[2]
-        
-        if use_same_calib:
-            fx = avg_K[0, 0]  / downsample_scale
-            fy = avg_K[1, 1]  / downsample_scale
-            cx = avg_K[0, 2]  / downsample_scale
-            cy = avg_K[1, 2]  / downsample_scale
-            kappa = avg_kappa / downsample_scale
-        else:
-            K, kappa = calib_stack[camera_id]
-            fx = K[0, 0]  / downsample_scale
-            fy = K[1, 1]  / downsample_scale
-            cx = K[0, 2]  / downsample_scale
-            cy = K[1, 2]  / downsample_scale
-            kappa = kappa / downsample_scale
-
-        cam = Camera (
-                    uid = image_id,
-                    color = gt_image,
-                    depth = None,
-                    image_height = image_height,
-                    image_width = image_width,
-                    R = R, T = T,
-                    fx = fx,
-                    fy = fy,
-                    cx = cx,
-                    cy = cy,
-                    fovx = None,
-                    fovy = None,
-                    kappa = kappa,
-                    trans=np.array([0.0, 0.0, 0.0]),
-                    scale=1.0,
-                    gt_alpha_mask = None,
-                    device="cuda:0",
-        )
-        camera_stack.append(cam)
-        camera_centers.append( - R.transpose() @ T.reshape((3, 1)) ) # camera center
-    # getNerfppNorm copied from 3DGS original implementation
-    def get_center_and_diag(cam_centers):
-        cam_centers = np.hstack(cam_centers)
-        avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
-        center = avg_cam_center
-        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
-        diagonal = np.max(dist)
-        return center.flatten(), diagonal
-    center, diagonal = get_center_and_diag(camera_centers)
-    radius = diagonal * 1.1
-    translate = -center
-    return camera_stack, {"translate": translate, "radius": radius}
-
-
-
-
-def create_trajectory_lineset(viewpoint_stack, color=[0, 0, 1]):
-    camera_centers = []
-    for viewpoint in viewpoint_stack:
-        camera_centers.append ( viewpoint.camera_center.detach().cpu().numpy() )
-    points = np.array( camera_centers )
-
-    lines = []
-    for i in range(len(camera_centers)-1):
-        lines.append( [i, i+1] )
-
-    colors = [color for i in range(len(lines))]
-
-    odometry_line_set = o3d.geometry.LineSet()
-    odometry_line_set.points = o3d.utility.Vector3dVector(points)
-    odometry_line_set.lines = o3d.utility.Vector2iVector(lines)
-    odometry_line_set.colors = o3d.utility.Vector3dVector(colors)
     
-    return odometry_line_set
 
+
+
+    def __get_calibration(self):        
+        calib_dict = {}
+        avg_K = np.zeros((3,3))
+        avg_kappa = 0.0
+        for camera_id, camera in self.reconstruction.cameras.items():
+            if camera.model == pycolmap.CameraModelId.SIMPLE_RADIAL:
+                fx = camera.params[0]
+                fy = camera.params[0]
+                cx = camera.params[1]
+                cy = camera.params[2]
+                kappa = camera.params[3]
+                K = np.array([[fx,  0.0, cx],
+                            [0.0, fy,  cy],
+                            [0.0, 0.0, 1.0]])
+                calib_dict[camera_id] = (K, kappa)
+                avg_K += K
+                avg_kappa += kappa
+        return calib_dict,  avg_K/len(calib_dict),  avg_kappa/len(calib_dict)
+
+
+    @staticmethod
+    # copied from 3DGS colmap.loader.py
+    def __qvec2rotmat(qvec):
+        return np.array([
+            [1 - 2 * qvec[2]**2 - 2 * qvec[3]**2,   2 * qvec[1] * qvec[2] - 2 * qvec[0] * qvec[3],  2 * qvec[3] * qvec[1] + 2 * qvec[0] * qvec[2]],
+            [2 * qvec[1] * qvec[2] + 2 * qvec[0] * qvec[3],   1 - 2 * qvec[1]**2 - 2 * qvec[3]**2,  2 * qvec[2] * qvec[3] - 2 * qvec[0] * qvec[1]],
+            [2 * qvec[3] * qvec[1] - 2 * qvec[0] * qvec[2],   2 * qvec[2] * qvec[3] + 2 * qvec[0] * qvec[1],  1 - 2 * qvec[1]**2 - 2 * qvec[2]**2]])
+
+
+    def __set_to_single_camera(self, focal = None, kappa = None, delta_focal = None):        
+        # set all cameras to the same camera
+        for image_id, image in self.reconstruction.images.items():
+            image.camera_id = self.single_cam_id
+        
+        if focal is not None:
+            self.reconstruction.cameras[ self.single_cam_id ].params[0] = focal
+
+        if kappa is not None:
+            self.reconstruction.cameras[ self.single_cam_id ].params[3] = kappa
+
+        if delta_focal is not None:
+            self.reconstruction.cameras[ self.single_cam_id ].params[0] += delta_focal
+
+        return self.single_cam_id
 
 
 
@@ -298,13 +272,6 @@ if __name__ == "__main__":
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud.  3. Calibrations
     positions, colors = reconstruction.getPointCloud()
     posed_img_stack = reconstruction.getCamPosedImages()
-    calib_stack, focal0, kappa0 = reconstruction.getCalibration()
-
-    # interface to 3DGS
-    # pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
-    # viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
-
-    # sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = 1)
 
 
     try:
@@ -330,17 +297,13 @@ if __name__ == "__main__":
         
         # add cameras
         for image_id, item in posed_img_stack.items():
-            R, T, imgname, camera_id = item
-            K, kappa = calib_stack[camera_id]
+            R, T, imgname, K, kappa = item
             intrinsic = K            
             extrinsic = np.eye(4)
             extrinsic[:3, :3] = R
             extrinsic[:3, 3] = T
             cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=WIDTH, view_height_px=HEIGHT, intrinsic=intrinsic, extrinsic=extrinsic)
             vis.add_geometry(cameraLines)
-
-        # odometryLines = create_trajectory_lineset(viewpoint_stack)
-        # vis.add_geometry(odometryLines)
 
 
         # visualize and block

@@ -26,11 +26,17 @@ import open3d as o3d
 import copy
 
 
+from colmap_utils.colmap import ColMap
+from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras
+
+
+
 import pickle 
 
 from sfm import SFM
-from colmap import ColMap
-from colmap import assemble_3DGS_cameras
+
+
+
 
 from gaussian_viewer import Viewer, create_gaussians_gl
 
@@ -246,36 +252,43 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
 
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
-    
-    points3D_dict = reconstruction.getPoints3DXYZ()
-    sparse_keypoints_meausurements_dict = {}
-    poses_dict = {}
-    posed_image_dict = reconstruction.getCamPosedImages()
-    for image_id, item in posed_image_dict.items():
-        uid = image_id
-        R, T, imgname, camera_id = item
-        print(imgname)
-        sparse_keypoints_dict = reconstruction.getSparseKeypointsFromImage (image_id,  downsample_scale = downsample_scale)
-        sparse_keypoints_meausurements_dict[ image_id  ] = sparse_keypoints_dict
-        W2C = np.eye(4)
-        W2C[:3, :3] = R
-        W2C[:3, 3] = T
-        poses_dict[ image_id ] = W2C
 
-    calib_stack, avg_K, avg_kappa = reconstruction.getCalibration()
-    avg_K = avg_K  / downsample_scale
-    avg_K[2, 2] = 1.0
-    bundle_adjustment(kpt_measurements=sparse_keypoints_meausurements_dict,
-                      poses_w2c=poses_dict,
-                      points=points3D_dict,
-                      K=avg_K,
-                      compute_marginals=False, plot_figure=True)
+    if set_focal_error is not None:
+        # print(f"self.reconstruction.images  = \n{reconstruction.reconstruction.images}")
+        # print(f"self.reconstruction.cameras = \n{reconstruction.reconstruction.cameras}")
+        reconstruction.bundleAdjustmentByGivenCalibration(delta_focal=set_focal_error)
+        # print(f"self.reconstruction.images  = \n{reconstruction.reconstruction.images}")
+        # print(f"self.reconstruction.cameras = \n{reconstruction.reconstruction.cameras}")
 
 
-    sys.exit()
+    if False: # perform bundle adjustment using gtsam
+        points3D_dict = reconstruction.getPoints3DXYZ()
+        sparse_keypoints_meausurements_dict = {}
+        poses_dict = {}
+        posed_image_dict = reconstruction.getCamPosedImages()
+        for image_id, item in posed_image_dict.items():
+            uid = image_id
+            R, T, imgname, camera_id = item
+            print(imgname)
+            sparse_keypoints_dict = reconstruction.getSparseKeypointsFromImage (image_id,  downsample_scale = downsample_scale)
+            sparse_keypoints_meausurements_dict[ image_id  ] = sparse_keypoints_dict
+            W2C = np.eye(4)
+            W2C[:3, :3] = R
+            W2C[:3, 3] = T
+            poses_dict[ image_id ] = W2C
 
-    # perform BA with given calibration K
-    # opt_poses_c2w, opt_points = bundle_adjustment(kpt_measurements, poses_c2w, points, K)
+        calib_stack, avg_K, avg_kappa = reconstruction.getCalibration()
+        avg_K = avg_K  / downsample_scale
+        avg_K[2, 2] = 1.0
+        bundle_adjustment(kpt_measurements=sparse_keypoints_meausurements_dict,
+                        poses_w2c=poses_dict,
+                        points=points3D_dict,
+                        K=avg_K,
+                        compute_marginals=False, plot_figure=True)
+
+        # perform BA with given calibration K
+        opt_poses_c2w, opt_points = bundle_adjustment(kpt_measurements, poses_c2w, points, K)
+        sys.exit()
 
 
 
@@ -333,10 +346,11 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
         uid_arr.append(viewpoint.uid)
 
 
+    posed_image_dict = reconstruction.getCamPosedImages()
     gt_W2C_dic = {}
     for image_id, item in posed_image_dict.items():
         uid = image_id
-        R, T, imgname, camera_id = item        
+        R, T, imgname, K, kappa = item
         (K, pose, width, height) = read_groundtruth_camera(gt_dir + '/' + imgname + '.camera')
         gt_W2C_dic[uid] = pose
         # print("uid ", uid)
