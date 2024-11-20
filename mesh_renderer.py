@@ -86,15 +86,18 @@ if __name__ == "__main__":
 
     # use one of the downlaoded mesh
     mesh_file_path_name = armadillo_mesh.path
+    mesh_file_path_name = '/datasets/office1_mesh.ply'
+
 
     # read mesh
     mesh = o3d.io.read_triangle_mesh(mesh_file_path_name)
 
     # paint mesh with some color to make it look better, as the original is plain
-    mesh.paint_uniform_color([1, 0.706, 0])
+    # mesh.paint_uniform_color([1, 0.706, 0])
     
     # visualize mesh to find a proper camara for rendering
-    if False:
+    # if False:
+    if True:
         # Use the mouse to navigate and find the position which you want to render and then hit the button p
         # This will save a JSON file in the same directory called something like ScreenCamera_<somedate>.json, where you can read camera parameters
         vis = o3d.visualization.Visualizer()
@@ -110,25 +113,42 @@ if __name__ == "__main__":
     W, H = 1400, 750
     fx, fy, cx, cy = (650, 650, int((W+1)/2), int((H+1)/2))
 
+    # pose = np.array([
+    #     [0.36738127116417013,
+	# 	-0.8819864755306871,
+	# 	-0.29517936679035572,
+	# 	0.0,],
+	# 	[-0.67195035829121907,
+	# 	-0.47113237696821203,
+	# 	0.57141666003415137,
+	# 	0.0,],
+	# 	[-0.64305032275094987,
+	# 	-0.011581897652776257,
+	# 	-0.76573633977803346,
+	# 	0.0,],
+	# 	[14.392634748282532,
+	# 	10.091394343402053,
+	# 	171.22850707427983,
+	# 	1.0] ]
+    # ).transpose()
     pose = np.array([
-        [0.36738127116417013,
-		-0.8819864755306871,
-		-0.29517936679035572,
+        [1,
+		0,
+		0,
 		0.0,],
-		[-0.67195035829121907,
-		-0.47113237696821203,
-		0.57141666003415137,
+		[0,
+		1,
+		0,
 		0.0,],
-		[-0.64305032275094987,
-		-0.011581897652776257,
-		-0.76573633977803346,
+		[0,
+		0,
+		1,
 		0.0,],
-		[14.392634748282532,
-		10.091394343402053,
-		171.22850707427983,
+		[0,
+		0,
+		20,
 		1.0] ]
     ).transpose()
-
     print(f"pose :\n{pose}")
 
 

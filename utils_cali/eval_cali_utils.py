@@ -31,12 +31,13 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ## Plot
     traj_ref = PosePath3D(poses_se3=poses_gt)
     traj_est = PosePath3D(poses_se3=poses_est)
-    # traj_est_aligned = copy.deepcopy(traj_est)
-    # traj_est_aligned.align(traj_ref, correct_scale=monocular)
+
+    traj_est_aligned = copy.deepcopy(traj_est)
+    traj_est_aligned.align(traj_ref, correct_scale=monocular)
     # below old method does not work anymore
-    traj_est_aligned = trajectory.align_trajectory(
-        traj_est, traj_ref, correct_scale=monocular
-    )
+    # traj_est_aligned = trajectory.align_trajectory(
+    #     traj_est, traj_ref, correct_scale=monocular
+    # )
 
     ## RMSE
     pose_relation = metrics.PoseRelation.translation_part
@@ -100,8 +101,8 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
 
     def gen_pose_matrix(R, T):
         pose = np.eye(4)
-        pose[0:3, 0:3] = R.cpu().numpy()
-        pose[0:3, 3] = T.cpu().numpy()
+        pose[0:3, 0:3] = R.cpu().numpy() if isinstance(R, torch.Tensor) else R
+        pose[0:3, 3] = T.cpu().numpy() if isinstance(R, torch.Tensor) else T
         return pose
 
     for kf_id in kf_ids:
@@ -136,7 +137,7 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
         label=label_evo,
         monocular=monocular,
     )
-    wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
+    # wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
     return ate
 
 def eval_rendering(
@@ -210,11 +211,32 @@ def save_gaussians_class(save_dir, gaussians):
     with open(save_dir + '/gs/instance.pkl', 'wb') as f:
         pickle.dump(gaussians, f)
 
+def eval_cali(frames, kf_indices=None):
+
+    # select the calibration id != 0
+    n=0
+    AFLE=0
+    if kf_indices is None:
+        for id, kf in frames.items():
+            if kf.calibration_identifier != 0:
+                n += 1
+                AFLE += abs(kf.fx_init - kf.fx)
+    else:
+        for kf_id in kf_indices:
+            kf = frames[kf_id]
+            if kf.calibration_identifier != 0:
+                n += 1
+                AFLE += abs(kf.fx_init - kf.fx) 
+    return AFLE/n if n != 0 else 0
+
 def save_cali(save_dir, frames, kf_indices, N_frames=None):
     cali_data = dict()
     cali_id, focal_est, focal_gt = [], [], []
     kappa_est, kappa_gt = [], []
     focal_percentage = []
+    # select the calibration id != 0
+    n=0
+    AFLE=0
 
     for kf_id in kf_indices:
         kf = frames[kf_id]
@@ -226,13 +248,18 @@ def save_cali(save_dir, frames, kf_indices, N_frames=None):
 
         kappa_est.append(frames[kf_id].kappa)
         kappa_gt.append(frames[kf_id].kappa_init)
+        if kf.calibration_identifier != 0:
+            n += 1
+            AFLE += abs(frames[kf_id].fx_init - frames[kf_id].fx) 
 
+    cali_data["AFLE"] = AFLE/n if n != 0 else 0
     cali_data["cali_id"] = cali_id
     cali_data["focal_est"] = focal_est
     cali_data["focal_gt"] = focal_gt
     cali_data["kappa_est"] = kappa_est
     cali_data["kappa_gt"] = kappa_gt
     cali_data["focal_percentage"] = focal_percentage
+
 
     cali_dir = os.path.join(save_dir, "cali")
     plot_dir = os.path.join(save_dir, "cali", "plot")
@@ -269,3 +296,4 @@ def save_cali(save_dir, frames, kf_indices, N_frames=None):
     plot_file_path_pdf = os.path.join(plot_dir, 'focal_vs_cali_id.pdf')
     plt.savefig(plot_file_path_pdf)
     plt.close()
+    return AFLE/n if n != 0 else 0

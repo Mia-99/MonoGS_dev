@@ -40,6 +40,14 @@ from sfm import SFM
 
 from gaussian_viewer import Viewer, create_gaussians_gl
 
+from gaussian_splatting.gaussian_renderer import render
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from gaussian_splatting.utils.image_utils import psnr
+from gaussian_splatting.utils.loss_utils import ssim
+from gaussian_splatting.utils.system_utils import mkdir_p
+import cv2
+import json
+from datetime import datetime
 
 from utils.eval_utils import evaluate_evo, eval_ate, eval_rendering
 
@@ -115,6 +123,73 @@ from gtsam_utils import bundle_adjustment
 
 #     return positions, colors
 
+def load_gt(directory):
+    camera_files = [f for f in os.listdir(directory) if f.endswith('.camera')]
+    camera_files.sort()  # Ensure numerical order
+    all_camera_params = []  # List to store all camera parameters
+    fxs = []
+    fys = []
+    R_gts = []
+    T_gts = []
+
+    for filename in camera_files:
+        filepath = os.path.join(directory, filename)
+        with open(filepath, 'r') as file:
+            lines = file.readlines()
+
+            # Parsing intrinsic matrix
+            intrinsic = np.array([list(map(float, lines[i].strip().split())) for i in range(3)])
+            fx = intrinsic[0, 0]
+            fxs.append(fx)
+            fy = intrinsic[1, 1]
+            fys.append(fy)
+
+            # Parsing extrinsic parameters (rotation matrix and translation vector)
+            rotation = np.array([list(map(float, lines[i].strip().split())) for i in range(4, 7)])
+            translation = np.array(list(map(float, lines[7].strip().split())))
+            # 4x4 eye
+            T = np.eye(4)
+            T[:3, :3] = rotation
+            T[:3, 3] = translation
+            R_gts.append(torch.tensor(rotation, dtype=torch.float32, device=torch.device('cuda')))
+            T_gts.append(torch.tensor(translation, dtype=torch.float32, device=torch.device('cuda')))
+            
+            
+            # Image dimensions
+            dimensions = list(map(int, lines[8].strip().split()))
+
+            # Store in a dictionary
+            camera_params = {
+                'intrinsic': intrinsic,
+                'rotation': rotation,
+                'translation': translation,
+                'dimensions': dimensions
+            }
+            all_camera_params.append(camera_params)
+    
+    return R_gts, T_gts, fxs, fys
+
+def save_rendering(viewpoints, gaussians, kf_indices, pipeline_params, save_path):
+        bg_color = [0, 0, 0]
+        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+        dir = os.path.join(save_path, 'rendering')
+        os.makedirs(os.path.join(dir, 'pred'), exist_ok=True)
+        os.makedirs(os.path.join(dir, 'gt'), exist_ok=True)
+        img_pred, img_gt, saved_frame_idx = [], [], []
+        psnr_array, ssim_array, lpips_array = [], [], []
+        cal_lpips = LearnedPerceptualImagePatchSimilarity(
+            net_type="alex", normalize=True
+        ).to("cuda")
+        
+        for i in range(len(kf_indices)):
+            idx = kf_indices[i]
+            # gt_image format:
+            # torch.Size([3, 600, 800])
+            # torch.float32
+            # cuda:0
+            gt_image = viewpoints[idx].original_image.to("cuda:0")
+            viewpoint = viewpoints[idx]
+            # viewpoint.compute_grad_mask(self.config)
 
 
 def eval_rendering_metrics(rendered_images, captured_images):

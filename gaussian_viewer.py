@@ -1,13 +1,12 @@
 
 # https://github.com/isl-org/Open3D/blob/73508bcaba0a9a31e398bf8de76e3bbeaed81540/examples/python/visualization/video.py
+import pickle
 import numpy as np
 import open3d as o3d
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 import time
 import threading
-
-
 
 import os
 
@@ -474,7 +473,59 @@ def read_camera_json (json_file_path):
     return cam_infos
 
 
+def load_replica_poses(path):
+        cam_infos = []
+        with open(path, "r") as f:
+            lines = f.readlines()
 
+        frames = []
+        poses = []
+        for i in range(600):
+            line = lines[i]
+            pose = np.array(list(map(float, line.split()))).reshape(4, 4)
+            pose = np.linalg.inv(pose)
+            poses.append(pose)
+            gR = np.transpose(pose[:3, :3])
+            gT = - np.transpose(pose[:3, :3]) @ pose[:3, 3]
+
+            cam = CamInfo(
+                i, gR, gT
+            )
+            cam_infos.append(cam)
+
+        return cam_infos
+
+def gaussian_model_to_gaussian_data(gaussian_model):
+    xyz = gaussian_model.get_xyz.cpu().numpy() 
+    opacity = gaussian_model.get_opacity.cpu().numpy()
+    scale = gaussian_model.get_scaling.cpu().numpy()
+    rot = gaussian_model.get_rotation.cpu().numpy()
+    features_dc = gaussian_model.get_features.cpu().numpy() #output with features_cd and features_rest
+    
+    # extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+    # extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+    # assert len(extra_f_names)==3 * (max_sh_degree + 1) ** 2 - 3
+    # features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+    # for idx, attr_name in enumerate(extra_f_names):
+    #     features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+    # # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+    # features_extra = features_extra.reshape((features_extra.shape[0], 3, (max_sh_degree + 1) ** 2 - 1))
+    # features_extra = np.transpose(features_extra, [0, 2, 1])
+    extra_f_names = []
+    features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+    shs = np.concatenate([features_dc.reshape(-1, 3), 
+                    features_extra.reshape(len(features_dc), -1)], axis=-1).astype(np.float32)
+    shs = shs.astype(np.float32)
+    # sh = gaussian_model.get_features.detach().cpu().numpy()[:, 0, :]
+    sh = gaussian_model.max_sh_degree
+    print("len(shs): ", len(shs))
+    print("len(xyz): ", len(xyz))
+    print("len(rot): ", len(rot))
+    print("len(scale): ", len(scale))
+    print("len(opacity): ", len(opacity))
+    print("len(features_dc): ", len(features_dc))
+    # exit()  
+    return util_gau.GaussianData(xyz, rot, scale, opacity, shs)
 
 def main():
 
