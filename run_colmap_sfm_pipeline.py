@@ -247,16 +247,6 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
     
-    # This is bad as it breaks the initial colmap configuration, before a proper 3D gaussian densification stage
-    # This might as well if a dense intialization if available
-    #
-    # for cam in viewpoint_stack:
-    #     print(f"cam.uid = {cam.uid}")
-    #     if set_focal_error is not None:
-    #         focal = cam.fx + set_focal_error
-    #         cam.fx = focal
-    #         cam.fy = cam.aspect_ratio * focal
-
 
     print(f"scale_info = {scale_info}")
     cameras_extent = scale_info["radius"]
@@ -284,8 +274,7 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
                  phase3_iter = phase3_iter,
                  phase2_DBA_iter = phase2_DBA_iter,
                  phase2_CaliDBA_iter = phase2_CaliDBA_iter,
-                 phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
-                 set_focal_error = set_focal_error)
+                 phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter)
 
     (W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images, error_images) = sfm.eval_data()
 

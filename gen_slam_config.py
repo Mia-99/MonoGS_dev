@@ -114,7 +114,7 @@ if __name__ == "__main__":
  
     # test()
 
-    # python config_files_generation.py --yaml_file_path "slam_config_example.yaml" --fx 100 --selfcalib_frame_id "100, 200, 300, 400, 500"
+    # python gen_slam_config.py --yaml_file_path "slam_config_example.yaml" --fx 100 --selfcalib_frame_id "100, 200, 300, 400, 500"
 
     parser = argparse.ArgumentParser(
                         prog='ProgramName',
