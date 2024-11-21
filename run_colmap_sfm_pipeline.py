@@ -40,14 +40,6 @@ from sfm import SFM
 
 from gaussian_viewer import Viewer, create_gaussians_gl
 
-from gaussian_splatting.gaussian_renderer import render
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from gaussian_splatting.utils.image_utils import psnr
-from gaussian_splatting.utils.loss_utils import ssim
-from gaussian_splatting.utils.system_utils import mkdir_p
-import cv2
-import json
-from datetime import datetime
 
 from utils.eval_utils import evaluate_evo, eval_ate, eval_rendering
 
@@ -73,123 +65,9 @@ import cv2
 
 from matplot_utils import image_annotation
 
-from gtsam_utils import bundle_adjustment
+from gtsam_utils.bundle_adjustment import bundle_adjustment
 
 
-
-
-# from depth_anything import DepthAnything
-# def init_dense_pcd_from_network (viewpoint_stack, reconstruction: ColMap, num_points = 20000):
-
-#     pcd_downsample_factor = viewpoint_stack[0].image_height * viewpoint_stack[0].image_width * len(viewpoint_stack) / num_points
-
-#     DA = DepthAnything()
-
-#     positions = None
-#     colors = None
-
-#     for cam in viewpoint_stack:
-
-#         sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = cam.uid, downsample_scale = downsample_scale )
-#         rgb_raw = (cam.original_image *255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
-
-#         # use depth prediction from a Neural network
-#         disp_raw = DA.eval(rgb_raw)
-#         depth_raw = 10.0 / disp_raw  # depth = (focal * baseline) / disparity
-
-#         # depth_rect = DA.correct_depth_from_sparse_points (depth=depth_raw, uv_depth_stack=sparse_depth_stack)
-
-#         scale = DA.estimateScaleFactor(depth=depth_raw, uv_depth_stack=sparse_depth_stack)
-#         depth_rect = depth_raw * scale
-#         print(f"depth scale correction = {scale}, rgb_raw.shape = {rgb_raw.shape} depth_raw.shape = {depth_raw.shape}, depth_rect.shape = {depth_rect.shape}")
-
-
-#         if False:
-#             plt.rcParams["figure.figsize"] = (15, 6)
-#             fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3)
-#             ax1.imshow(rgb_raw)
-#             ax2.imshow(depth_raw)
-#             ax3.imshow(depth_rect)
-#             plt.show()
-
-
-#         # RGB-D image to pcd in world frame
-#         rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
-#         depth = o3d.geometry.Image(depth_rect.astype(np.float32))
-#         new_xyz, new_rgb = GaussianModel.create_pcd_from_image_and_depth(cam, rgb, depth, downsample_factor = pcd_downsample_factor)
-        
-#         positions = np.concatenate((positions, new_xyz), axis=0) if positions is not None else new_xyz
-#         colors = np.concatenate((colors, new_rgb), axis=0) if colors is not None else new_rgb
-
-#     return positions, colors
-
-def load_gt(directory):
-    camera_files = [f for f in os.listdir(directory) if f.endswith('.camera')]
-    camera_files.sort()  # Ensure numerical order
-    all_camera_params = []  # List to store all camera parameters
-    fxs = []
-    fys = []
-    R_gts = []
-    T_gts = []
-
-    for filename in camera_files:
-        filepath = os.path.join(directory, filename)
-        with open(filepath, 'r') as file:
-            lines = file.readlines()
-
-            # Parsing intrinsic matrix
-            intrinsic = np.array([list(map(float, lines[i].strip().split())) for i in range(3)])
-            fx = intrinsic[0, 0]
-            fxs.append(fx)
-            fy = intrinsic[1, 1]
-            fys.append(fy)
-
-            # Parsing extrinsic parameters (rotation matrix and translation vector)
-            rotation = np.array([list(map(float, lines[i].strip().split())) for i in range(4, 7)])
-            translation = np.array(list(map(float, lines[7].strip().split())))
-            # 4x4 eye
-            T = np.eye(4)
-            T[:3, :3] = rotation
-            T[:3, 3] = translation
-            R_gts.append(torch.tensor(rotation, dtype=torch.float32, device=torch.device('cuda')))
-            T_gts.append(torch.tensor(translation, dtype=torch.float32, device=torch.device('cuda')))
-            
-            
-            # Image dimensions
-            dimensions = list(map(int, lines[8].strip().split()))
-
-            # Store in a dictionary
-            camera_params = {
-                'intrinsic': intrinsic,
-                'rotation': rotation,
-                'translation': translation,
-                'dimensions': dimensions
-            }
-            all_camera_params.append(camera_params)
-    
-    return R_gts, T_gts, fxs, fys
-
-def save_rendering(viewpoints, gaussians, kf_indices, pipeline_params, save_path):
-        bg_color = [0, 0, 0]
-        background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-        dir = os.path.join(save_path, 'rendering')
-        os.makedirs(os.path.join(dir, 'pred'), exist_ok=True)
-        os.makedirs(os.path.join(dir, 'gt'), exist_ok=True)
-        img_pred, img_gt, saved_frame_idx = [], [], []
-        psnr_array, ssim_array, lpips_array = [], [], []
-        cal_lpips = LearnedPerceptualImagePatchSimilarity(
-            net_type="alex", normalize=True
-        ).to("cuda")
-        
-        for i in range(len(kf_indices)):
-            idx = kf_indices[i]
-            # gt_image format:
-            # torch.Size([3, 600, 800])
-            # torch.float32
-            # cuda:0
-            gt_image = viewpoints[idx].original_image.to("cuda:0")
-            viewpoint = viewpoints[idx]
-            # viewpoint.compute_grad_mask(self.config)
 
 
 def eval_rendering_metrics(rendered_images, captured_images):
@@ -329,6 +207,7 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     reconstruction = ColMap(image_dir)
 
     if set_focal_error is not None:
+        print(f"\nSet Focal Length Error:\n\tdelta_focal = {set_focal_error}. \n\tPerform BA to enforce this change.")
         # print(f"self.reconstruction.images  = \n{reconstruction.reconstruction.images}")
         # print(f"self.reconstruction.cameras = \n{reconstruction.reconstruction.cameras}")
         reconstruction.bundleAdjustmentByGivenCalibration(delta_focal=set_focal_error)
@@ -343,26 +222,22 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
         posed_image_dict = reconstruction.getCamPosedImages()
         for image_id, item in posed_image_dict.items():
             uid = image_id
-            R, T, imgname, camera_id = item
-            print(imgname)
+            R, T, imgname, K, kappa = item
             sparse_keypoints_dict = reconstruction.getSparseKeypointsFromImage (image_id,  downsample_scale = downsample_scale)
             sparse_keypoints_meausurements_dict[ image_id  ] = sparse_keypoints_dict
             W2C = np.eye(4)
             W2C[:3, :3] = R
             W2C[:3, 3] = T
             poses_dict[ image_id ] = W2C
-
-        calib_stack, avg_K, avg_kappa = reconstruction.getCalibration()
-        avg_K = avg_K  / downsample_scale
+        avg_K = K  / downsample_scale
         avg_K[2, 2] = 1.0
+        # perform BA with given calibration K
         bundle_adjustment(kpt_measurements=sparse_keypoints_meausurements_dict,
                         poses_w2c=poses_dict,
                         points=points3D_dict,
                         K=avg_K,
                         compute_marginals=False, plot_figure=True)
 
-        # perform BA with given calibration K
-        opt_poses_c2w, opt_points = bundle_adjustment(kpt_measurements, poses_c2w, points, K)
         sys.exit()
 
 
