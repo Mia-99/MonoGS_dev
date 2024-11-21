@@ -23,68 +23,90 @@ def ordered_dump(data, stream=None, Dumper=yaml.Dumper, **kwds):
     OrderedDumper.add_representer(OrderedDict, _dict_representer)
     return yaml.dump(data, stream, OrderedDumper, **kwds)
 
-# Usage in your script
-def generate_config_files(base_dir, base_file, offices, widths, heights, focals):
-    base_path = os.path.join(base_dir, base_file)
-    with open(base_path, 'r') as file:
-        base_config = ordered_load(file, yaml.SafeLoader)
+def config_OrderedDict(inherit_from = 'configs/mono/replica_small/base_config.yaml',
+                       dataset_path = '/datasets/replica_small/office0',
+                       width = 680,
+                       height = 480,
+                       fx = 500,
+                       fy = None,
+                       cx = None,
+                       cy = None,
+                       k1 = 0.0, k2 = 0.0, p1 = 0.0, p2 = 0.0, k3 = 0.0,
+                       depth_scale = 6553.5,
+                       distorted = False,
+                       selfcalib_enabled = True,
+                       selfcalib_radial = 0,
+                       selfcalib_frame_id = None,
+                       selfcalib_gt_fx = None,
+                       backend_params_lr_cnt1 = 0.002,
+                       backend_params_lr_cnt2 = 0.002,
+                       grad_mask_row = 32,
+                       grad_mask_col = 32,
+                       single_thread = False,
+                       dataset_type = 'replica'):
+
+    fy = fx if fy is None else fy
+    cx = ( width - 1)*0.5 if cx is None else cx
+    cy = (height - 1)*0.5 if cy is None else cy
+
+    config = OrderedDict([
+            ('inherit_from', inherit_from),
+            ('Dataset', OrderedDict([
+                    ('dataset_path', dataset_path),
+                    ('type', dataset_type),
+                    ('single_thread', single_thread),
+                    ('Calibration', OrderedDict([
+                            ('fx', fx),
+                            ('fy', fy),
+                            ('cx', cx),
+                            ('cy', cy),
+                            ('k1', k1),
+                            ('k2', k2),
+                            ('p1', p1),
+                            ('p2', p2),
+                            ('k3', k3),
+                            ('width', width),
+                            ('height', height),
+                            ('depth_scale', depth_scale),
+                            ('distorted', distorted)
+                            ])),
+                    ('SelfCalibration', OrderedDict([
+                            ('enabled', selfcalib_enabled),
+                            ('radial_distortion', selfcalib_radial),
+                            ('frame_id', selfcalib_frame_id),
+                            ('gt_fx', selfcalib_gt_fx),
+                            ('backend_params', OrderedDict([
+                                        ('lr_cnt1', backend_params_lr_cnt1),
+                                        ('lr_cnt2', backend_params_lr_cnt2)
+                                        ]))
+                            ])),
+                    ('grad_mask_row', grad_mask_row),
+                    ('grad_mask_col', grad_mask_col)
+                ]))
+        ])
     
-    data_dict = {}
+    return config
 
-    # Loop through the specified office numbers, dimensions, and focal lengths
-    for office in offices:
-        office_key = f"{office}"  # Create a dynamic key for each office
-        data_dict[office_key] = []  # Initialize the list for this office
-        
-        for width in widths:
-            for height in heights:
-                for focal in focals:
-                    # Modify the base config for each dimension and focal length
-                    config = base_config.copy()
-                    config['Dataset']['dataset_path'] = f"/datasets/replica_small/office{office}_{width}{height}_{focal}"
-                    config['Dataset']['Calibration']['fx'] = focal
-                    config['Dataset']['Calibration']['fy'] = focal
-                    config['Dataset']['Calibration']['cx'] = width / 2 - 0.5
-                    config['Dataset']['Calibration']['cy'] = height / 2 - 0.5
-                    config['Dataset']['Calibration']['width'] = width
-                    config['Dataset']['Calibration']['height'] = height
 
-                    # Create new file name based on parameters
-                    new_filename = f"office{office}_{width}{height}_{focal}.yaml"
-                    new_file_path = os.path.join(base_dir, new_filename)
 
-                    # read the intrinsic parameters from txt file config['Dataset']['dataset_path'], intrinsic_filename
-                    with open(os.path.join(config['Dataset']['dataset_path'], config['Dataset']['intrinsic_filename']), 'r') as file:
-                        # read the first line without \n to integer
-                        f_test = int(file.readline().strip())
-                    assert f_test == focal, f"Error: focal length in the intrinsic file is not equal to the focal length in the config file: {f_test} != {focal}"
+if __name__ == "__main__":
 
-                    data_dict[office_key].append(f"_{width}{height}_{focal}")
+    config = config_OrderedDict(inherit_from = 'configs/mono/replica_small/base_config.yaml',
+                       dataset_path = '/datasets/replica_small/office0',
+                       width = 680,
+                       height = 480,
+                       fx = 500,
+                       selfcalib_frame_id = "100, 200, 300",
+                       selfcalib_gt_fx= "400, 300, 200")
 
-                    # Write the modified configuration to a new YAML file
-                    with open(new_file_path, 'w') as file:
-                        ordered_dump(config, file, Dumper=yaml.SafeDumper, default_flow_style=False)
+    print(config)
 
-                    print(f"Generated config file: {new_file_path}")
+    yaml_file_path = "text.yaml"
+    with open(yaml_file_path, 'w') as file:
+        ordered_dump(config, file, Dumper=yaml.SafeDumper, default_flow_style=False)
+
+
+    config_loaded = ordered_load(yaml_file_path, Loader=yaml.Loader, object_pairs_hook=OrderedDict)
+    print(config_loaded)
+
     
-    print("\n\ndata_dict = {")
-    for key, values in data_dict.items():
-        # Sort values and remove duplicates
-        unique_sorted_values = sorted(set(values), key=lambda x: int(x.split('_')[-1]))
-        formatted_values = ", ".join(f"'{value}'" for value in unique_sorted_values)
-        print(f"    \"{key}\": [{formatted_values}]")
-    print("}")
-# print the data_dict
-
-print("Generating configuration files...")
-
-# Configuration settings
-base_directory = "/workspaces/src/MonoGS_dev/configs/mono/replica_small"
-base_filename = "office0.yaml"
-office_numbers = range(0, 1)  # Generate for office0 to office4
-widths = [640]           # Example widths
-heights = [480]          # Example heights
-focal_lengths = [300, 400, 510, 560, 600, 700, 800]  # Example focal lengths
-
-# Generate the configuration files
-generate_config_files(base_directory, base_filename, office_numbers, widths, heights, focal_lengths)
