@@ -1,6 +1,9 @@
 import os
 import yaml
 from collections import OrderedDict
+import argparse
+import sys
+
 
 def ordered_load(stream, Loader=yaml.Loader, object_pairs_hook=OrderedDict):
     class OrderedLoader(Loader):
@@ -88,25 +91,60 @@ def config_OrderedDict(inherit_from = 'configs/mono/replica_small/base_config.ya
     return config
 
 
-
-if __name__ == "__main__":
+def test():
 
     config = config_OrderedDict(inherit_from = 'configs/mono/replica_small/base_config.yaml',
-                       dataset_path = '/datasets/replica_small/office0',
-                       width = 680,
-                       height = 480,
-                       fx = 500,
-                       selfcalib_frame_id = "100, 200, 300",
-                       selfcalib_gt_fx= "400, 300, 200")
-
+                                dataset_path = '/datasets/replica_small/office0',
+                                width = 680,
+                                height = 480,
+                                fx = 500,
+                                selfcalib_frame_id = "100, 200, 300",
+                                selfcalib_gt_fx= "400, 300, 200")
     print(config)
 
-    yaml_file_path = "text.yaml"
+    yaml_file_path = "test.yaml"
     with open(yaml_file_path, 'w') as file:
         ordered_dump(config, file, Dumper=yaml.SafeDumper, default_flow_style=False)
-
 
     config_loaded = ordered_load(yaml_file_path, Loader=yaml.Loader, object_pairs_hook=OrderedDict)
     print(config_loaded)
 
+
+if __name__ == "__main__":
+ 
+    # test()
+
+    # python config_files_generation.py --yaml_file_path "slam_config_example.yaml" --fx 100 --selfcalib_frame_id "100, 200, 300, 400, 500"
+
+    parser = argparse.ArgumentParser(
+                        prog='ProgramName',
+                        formatter_class=argparse.RawDescriptionHelpFormatter,
+                        description='SLAM YAML File Generator',
+                        epilog='Text at the bottom of help')
     
+
+    parser.add_argument('--inherit_from', type=str, default='configs/mono/replica_small/base_config.yaml')
+    parser.add_argument('--dataset_path', type=str, default='/datasets/replica_small/office0')
+    parser.add_argument('--width', type=int, default=800)
+    parser.add_argument('--height', type=int, default=600)
+    parser.add_argument('--fx', type=float, default=500)
+    parser.add_argument('--fy', type=float, default=None)
+    parser.add_argument('--selfcalib_frame_id', type=str, default=None)
+    parser.add_argument('--selfcalib_gt_fx', type=str, default=None)
+    parser.add_argument('--yaml_file_path', type=str, default="test.yaml")
+
+    args = parser.parse_args(sys.argv[1:])
+
+    config = config_OrderedDict(inherit_from = args.inherit_from,
+                                dataset_path = args.dataset_path,
+                                width = args.width,
+                                height = args.height,
+                                fx = args.fx,
+                                fy = args.fy,
+                                selfcalib_frame_id = args.selfcalib_frame_id,
+                                selfcalib_gt_fx= args.selfcalib_gt_fx
+                                )
+
+    yaml_file_path = args.yaml_file_path
+    with open(yaml_file_path, 'w') as file:
+        ordered_dump(config, file, Dumper=yaml.SafeDumper, default_flow_style=False)
