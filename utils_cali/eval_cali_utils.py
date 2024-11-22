@@ -229,7 +229,7 @@ def eval_cali(frames, kf_indices=None):
                 AFLE += abs(kf.fx_init - kf.fx) 
     return AFLE/n if n != 0 else 0
 
-def save_cali(save_dir, frames, kf_indices, N_frames=None):
+def save_cali(save_dir, frames, kf_indices, ATE_records=None):
     cali_data = dict()
     cali_id, focal_est, focal_gt = [], [], []
     kappa_est, kappa_gt = [], []
@@ -259,7 +259,7 @@ def save_cali(save_dir, frames, kf_indices, N_frames=None):
     cali_data["kappa_est"] = kappa_est
     cali_data["kappa_gt"] = kappa_gt
     cali_data["focal_percentage"] = focal_percentage
-
+    cali_data["ATE_records"] = ATE_records
 
     cali_dir = os.path.join(save_dir, "cali")
     plot_dir = os.path.join(save_dir, "cali", "plot")

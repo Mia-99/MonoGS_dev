@@ -55,6 +55,9 @@ class FrontEnd(mp.Process):
         self.signal_calibration_change = False
         self.calibration_identifier = 0 # current calibration id
 
+        # ATE array
+        self.ATE_records = []
+
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -379,7 +382,7 @@ class FrontEnd(mp.Process):
                 tic.record()
                 if cur_frame_idx >= len(self.dataset):
                     if self.save_results:
-                        eval_ate(
+                        ate = eval_ate(
                             self.cameras,
                             self.kf_indices,
                             self.save_dir,
@@ -387,6 +390,7 @@ class FrontEnd(mp.Process):
                             final=True,
                             monocular=self.monocular,
                         )
+                        self.ATE_records.append( (cur_frame_idx, ate) )
                         save_gaussians(
                             self.gaussians, self.save_dir, "final", final=True
                         )
@@ -570,13 +574,14 @@ class FrontEnd(mp.Process):
                     and len(self.kf_indices) % self.save_trj_kf_intv == 0
                 ):
                     Log("Evaluating ATE at frame: ", cur_frame_idx)
-                    eval_ate(
+                    ate = eval_ate(
                         self.cameras,
                         self.kf_indices,
                         self.save_dir,
                         cur_frame_idx,
                         monocular=self.monocular,
                     )
+                    self.ATE_records.append( (cur_frame_idx, ate) )
                 toc.record()
                 torch.cuda.synchronize()
                 if create_kf:

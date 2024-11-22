@@ -28,7 +28,7 @@ import numpy as np
 
 
 from gaussian_viewer import Viewer, create_gaussians_gl
-
+from utils_cali.eval_cali_utils import save_gaussians_class, save_cali
 
 
 class OnlineCalibrationSettings:
@@ -208,6 +208,11 @@ class SLAM:
             )
             wandb.log({"Metrics": metrics_table})
             save_gaussians(self.gaussians, self.save_dir, "final_after_opt", final=True)
+            # print the number of gaussians
+            Log("Number of Gaussians: {}".format(self.gaussians.get_xyz.shape[0]))
+            # save gaussians class
+            save_gaussians_class(self.save_dir, self.gaussians)
+            save_cali(self.save_dir, self.frontend.cameras, self.frontend.kf_indices, self.frontend.ATE_records)
 
         backend_queue.put(["stop"])
         backend_process.join()
