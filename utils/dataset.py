@@ -199,6 +199,11 @@ class BaseDataset(torch.utils.data.Dataset):
         self.dtype = torch.float32
         self.num_imgs = 999999
 
+        frame_id = config.get("Dataset", {}).get("SelfCalibration", {}).get("frame_id", None)
+        gt_fx = config.get("Dataset", {}).get("SelfCalibration", {}).get("gt_fx", None)
+        self.frame_id = np.fromstring(frame_id, dtype=int, sep=',') if frame_id is not None else np.array([])
+        self.gt_fx = np.fromstring(gt_fx, dtype=float, sep=',') if gt_fx is not None else np.array([])
+
     def __len__(self):
         return self.num_imgs
 
@@ -275,7 +280,8 @@ class MonocularDataset(BaseDataset):
             .to(device=self.device, dtype=self.dtype)
         )
         pose = torch.from_numpy(pose).to(device=self.device)
-        return image, depth, pose
+        calib_id = 1 if (idx in self.frame_id) else 0
+        return image, depth, pose, calib_id
 
 
 class StereoDataset(BaseDataset):
@@ -389,8 +395,8 @@ class StereoDataset(BaseDataset):
             .to(device=self.device, dtype=self.dtype)
         )
         pose = torch.from_numpy(pose).to(device=self.device)
-
-        return image, depth, pose
+        calib_id = 1 if (idx in self.frame_id) else 0
+        return image, depth, pose, calib_id
 
 
 class TUMDataset(MonocularDataset):
@@ -515,8 +521,8 @@ class RealsenseDataset(BaseDataset):
             .permute(2, 0, 1)
             .to(device=self.device, dtype=self.dtype)
         )
-
-        return image, depth, pose
+        calib_id = 1 if (idx in self.frame_id) else 0
+        return image, depth, pose, calib_id
 
 
 def load_dataset(args, path, config):

@@ -53,6 +53,7 @@ class FrontEnd(mp.Process):
         self.require_calibration = False
         self.MODULE_TEST_CALIBRATION = False
         self.signal_calibration_change = False
+        self.calibration_identifier = 0 # current calibration id
 
 
     def set_hyperparams(self):
@@ -408,6 +409,19 @@ class FrontEnd(mp.Process):
                 )
                 viewpoint.compute_grad_mask(self.config)
 
+                # the camera notifies the frontend calibration that there exists carlibation change by
+                # passing a calibration_identifier > 0
+                # then frontend reset the right calibration identifier, by accumulating on the local calibration_identifier
+                if viewpoint.calibration_identifier > 0:  # expected value: 0, 1
+                    self.calibration_identifier += viewpoint.calibration_identifier
+                    if (not self.signal_calibration_change):
+                        rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx}")
+                        self.backend_queue.put(["calibration_change"])
+                    self.signal_calibration_change = True
+                else:
+                    self.signal_calibration_change = False
+                viewpoint.calibration_identifier = self.calibration_identifier
+
 
                 ###### test code block
                 if self.MODULE_TEST_CALIBRATION:
@@ -435,13 +449,6 @@ class FrontEnd(mp.Process):
                     prev = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
                     viewpoint.update_calibration (prev.fx, prev.fy, prev.kappa) # use last frame calibration
                     viewpoint.update_RT(prev.R, prev.T) # use last frame pose
-                    if viewpoint.calibration_identifier != prev.calibration_identifier:
-                        if (not self.signal_calibration_change):
-                            rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx}")
-                            self.backend_queue.put(["calibration_change"])
-                        self.signal_calibration_change = True
-                    else:
-                        self.signal_calibration_change = False
 
                 if self.signal_calibration_change:
                     viewpoint.kappa = 0.0 # reset kappa to zero for new calibration
