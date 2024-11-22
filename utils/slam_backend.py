@@ -77,6 +77,12 @@ class BackEnd(mp.Process):
             if "single_thread" in self.config["Dataset"]
             else False
         )
+        self.lr_cnt1 = 0.002
+        self.lr_cnt2 = 0.002
+        if 'SelfCalibration' in self.config['Dataset'].keys():
+            if 'backend_params' in self.config['Dataset']['SelfCalibration'].keys():
+                self.lr_cnt1 = self.config['Dataset']['SelfCalibration']['backend_params']['lr_cnt1']
+                self.lr_cnt2 = self.config['Dataset']['SelfCalibration']['backend_params']['lr_cnt2']
 
     def add_next_kf(self, frame_idx, viewpoint, init=False, scale=2.0, depth_map=None):
         self.gaussians.extend_from_pcd_seq(
@@ -570,23 +576,19 @@ class BackEnd(mp.Process):
                     ### The order of following three matters. prune goes last ###
                     if self.calibration_optimizers is not None:
                         if (self.calibration_identifier_cnt == 1): # Don't update 3D structure with one view
-                            lr1 = self.config["Training"]["be_focal_lr_cnt_s2"] if ("be_focal_lr_cnt_s2" in self.config["Training"].keys()) else 0.002
-                            self.calibration_optimizers.update_focal_learning_rate(lr = lr1)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt1)
                             self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=iter_per_kf*3)
 
                         elif (self.calibration_identifier_cnt == 2):
-                            lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
-                            self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # more iters for two views
 
                         elif (self.calibration_identifier_cnt == len(self.current_window)):
-                            lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
-                            self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # BA with full window
                             
                         else:
-                            lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
-                            self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
                     else:
                         self.map(self.current_window, iters=iter_per_kf)

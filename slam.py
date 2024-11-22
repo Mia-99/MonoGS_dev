@@ -35,7 +35,7 @@ class OnlineCalibrationSettings:
     def __init__ (self):
         self.require_calibration = True
         self.allow_lens_distortion = True
-
+        self.calib_module_test = False
 
 
 class SLAM:
@@ -111,7 +111,6 @@ class SLAM:
         # online calibration control
         self.backend.require_calibration = calib_opts.require_calibration
         self.backend.allow_lens_distortion = calib_opts.allow_lens_distortion
-
         self.backend.set_hyperparams()
 
         self.params_gui = gui_utils.ParamsGUI(
@@ -252,10 +251,21 @@ if __name__ == "__main__":
     save_dir = None
 
     calib_opts = OnlineCalibrationSettings()
-    # adjust controlo params
+
+    # config control params
+    if 'SelfCalibration' in config['Dataset'].keys():
+        print(f"selfCalibration:\n\t{ config['Dataset']['SelfCalibration'] }")
+        calib_opts.require_calibration = config['Dataset']['SelfCalibration']['enabled']
+        calib_opts.allow_lens_distortion = True if config['Dataset']['SelfCalibration']['radial_distortion'] == 1 else False
+        # print(f"calib_opts.require_calibration= {calib_opts.require_calibration}")
+        # print(f"calib_opts.allow_lens_distortion = {calib_opts.allow_lens_distortion }")
+        # sys.exit()
+
+    # argument control params
     calib_opts.require_calibration = args.require_calibration
     calib_opts.allow_lens_distortion = args.require_calibration and args.allow_lens_distortion # activated only when require_calibration = True
     calib_opts.calib_module_test = args.calib_module_test
+
 
     if args.eval:
         Log("Running MonoGS in Evaluation Mode")

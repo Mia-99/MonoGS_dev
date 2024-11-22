@@ -265,7 +265,7 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
     ## visualization
-    use_gui = True
+    use_gui = False
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.require_calibration = True
     sfm.allow_lens_distortion = True
@@ -676,4 +676,6 @@ if __name__ == "__main__":
 
         print("loaded dict")
         print(loaded_dict)
+
+
 
