@@ -77,12 +77,9 @@ class BackEnd(mp.Process):
             if "single_thread" in self.config["Dataset"]
             else False
         )
-        self.lr_cnt1 = 0.002
-        self.lr_cnt2 = 0.002
-        if 'SelfCalibration' in self.config['Dataset'].keys():
-            if 'backend_params' in self.config['Dataset']['SelfCalibration'].keys():
-                self.lr_cnt1 = self.config['Dataset']['SelfCalibration']['backend_params']['lr_cnt1']
-                self.lr_cnt2 = self.config['Dataset']['SelfCalibration']['backend_params']['lr_cnt2']
+        self.lr_cnt1 = self.config.get("Dataset", {}).get("SelfCalibration", {}).get("backend_params", {}).get("lr_cnt1", 0.002)
+        self.lr_cnt2 = self.config.get("Dataset", {}).get("SelfCalibration", {}).get("backend_params", {}).get("lr_cnt2", 0.002)
+
 
     def add_next_kf(self, frame_idx, viewpoint, init=False, scale=2.0, depth_map=None):
         self.gaussians.extend_from_pcd_seq(
