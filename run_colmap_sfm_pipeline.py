@@ -63,7 +63,7 @@ import pathlib
 import cv2
 
 
-from matplot_utils import image_annotation
+from matplot_utils import annotate_image
 
 from gtsam_utils.bundle_adjustment import bundle_adjustment
 
@@ -343,19 +343,19 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
             psnr_str = " {:.2f} ".format(psnr)
             
             rgb = sfm.tensor2rgb(rendered_images[idx])
-            fig, ax = image_annotation(rgb, cmap=None, mytext = psnr_str)
+            fig, ax = annotate_image(rgb, cmap=None, mytext = psnr_str)
             plt.savefig(os.path.join(save_to_dir, str(idx)+'_rendering'+'.png'), bbox_inches='tight', pad_inches=0)
             plt.close()
             time.sleep(0.01)
 
             rgb = sfm.tensor2rgb(captured_images[idx])
-            fig, ax = image_annotation(rgb, cmap=None, mytext = psnr_str)
+            fig, ax = annotate_image(rgb, cmap=None, mytext = psnr_str)
             plt.savefig(os.path.join(save_to_dir, str(idx)+'_original'+'.png'), bbox_inches='tight', pad_inches=0)
             plt.close()
             time.sleep(0.01)
 
             errormap = error_images[idx].permute(1, 2, 0).contiguous().cpu().numpy()
-            fig, ax = image_annotation(errormap, cmap='hot', mytext = psnr_str)
+            fig, ax = annotate_image(errormap, cmap='hot', mytext = psnr_str)
             plt.colorbar()
             plt.savefig(os.path.join(save_to_dir, str(idx)+'_errormap'+'.png'), bbox_inches='tight', pad_inches=0)            
             plt.close()

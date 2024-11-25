@@ -15,7 +15,7 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from gui import gui_utils, slam_gui
 from utils.config_utils import load_config
 from utils.dataset import load_dataset
-from utils.eval_utils import eval_ate, eval_rendering, save_gaussians
+from utils.eval_utils import save_gaussians, save_cameras
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
@@ -28,7 +28,7 @@ import numpy as np
 
 
 from gaussian_viewer import Viewer, create_gaussians_gl
-from utils_cali.eval_cali_utils import save_gaussians_class, save_cali
+from utils_cali.eval_cali_utils import eval_ate, eval_rendering, save_gaussians_class, save_cali
 
 
 class OnlineCalibrationSettings:
@@ -140,6 +140,8 @@ class SLAM:
         FPS = N_frames / (start.elapsed_time(end) * 0.001)
         Log("Total time", start.elapsed_time(end) * 0.001, tag="Eval")
         Log("Total FPS", N_frames / (start.elapsed_time(end) * 0.001), tag="Eval")
+        save_gaussians(self.gaussians, self.save_dir, "final_before_opt", iteration=N_frames, final=False)
+        save_cameras(self.save_dir, self.frontend.cameras)
 
         if self.eval_rendering:
             self.gaussians = self.frontend.gaussians
@@ -289,10 +291,13 @@ if __name__ == "__main__":
 
     if config["Results"]["save_results"]:
         mkdir_p(config["Results"]["save_dir"])
-        current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        # current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        base, name = os.path.split(args.config)
+        head, tail = os.path.split(base)
+        config_name = name[:-5]
         path = config["Dataset"]["dataset_path"].split("/")
         save_dir = os.path.join(
-            config["Results"]["save_dir"], path[-3] + "_" + path[-2], current_datetime
+            config["Results"]["save_dir"], tail, config_name
         )
         tmp = args.config
         tmp = tmp.split(".")[0]
@@ -306,7 +311,7 @@ if __name__ == "__main__":
         Log("saving results in " + save_dir)
         run = wandb.init(
             project="MonoGS",
-            name=f"{tmp}_{current_datetime}",
+            name=f"{tmp}_{config_name}",
             config=config,
             mode="disabled",
             # mode=None if config["Results"]["use_wandb"] else "disabled"

@@ -13,15 +13,23 @@ from matplotlib.text import OffsetFrom
 
 
 
-def image_annotation(image, cmap=plt.get_cmap('hot'), mytext = "my text"):
+def annotate_image(image, cmap=plt.get_cmap('hot'), mytext = "my text", mytextt = None, mytexttt = None):
     """
     Annotate an image with text on the upper-left corner
     """
+    h, w, _ = image.shape
+    px = 1/plt.rcParams['figure.dpi']  # pixel in inches
 
-    fig, ax = plt.subplots(1)
-    plt.imshow(image, cmap=cmap, interpolation='nearest')
-    plt.axis('off')
-
+    fig = plt.figure(figsize=(w*px, h*px))
+    ax = plt.Axes(fig, [0., 0., 1., 1.], )
+    ax.axis('off')
+    fig.add_axes(ax)
+    '''
+    need to specify axis range explicitly
+    https://stackoverflow.com/questions/13018115/matplotlib-savefig-image-size-with-bbox-inches-tight
+    '''
+    ax.imshow(image, cmap=cmap, interpolation='nearest')
+    
     '''
     Annotations
     https://matplotlib.org/1.5.3/users/annotations_guide.html   
@@ -44,18 +52,47 @@ def image_annotation(image, cmap=plt.get_cmap('hot'), mytext = "my text"):
     """
     an1 = ax.annotate(
         text = mytext,
-        fontsize = 10,
+        fontsize = 20,
         color='snow',
         xy=(0, 0),
-        xytext=(padding-offset_x, -(padding-offset_y)), 
+        xytext=(padding-offset_x, -(padding-offset_y)),
         textcoords = 'offset pixels',
         bbox=boxprops,
         va='top',
         ha='left',
         clip_on = True,
         )
-    
+
+    if mytextt is not None:
+        an2 = ax.annotate(
+            text = mytextt,
+            fontsize = 45,
+            color='red',
+            xy=(w/2, h/2),
+            xytext=(padding-offset_x, -(padding-offset_y)),
+            textcoords = 'offset pixels',
+            # bbox=boxprops,
+            va='center',
+            ha='center',
+            clip_on = True,
+            )    
+
+    if mytexttt is not None:
+        an3 = ax.annotate(
+            text = mytexttt,
+            fontsize = 20,
+            color='snow',
+            xy=(w/2, h-50),
+            xytext=(padding-offset_x, -(padding-offset_y)),
+            textcoords = 'offset pixels',
+            # bbox=boxprops,
+            va='top',
+            ha='center',
+            clip_on = True,
+            )
+
     return fig, ax
+
  
 
  

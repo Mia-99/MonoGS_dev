@@ -194,3 +194,39 @@ def save_gaussians(gaussians, name, iteration, final=False):
             name, "point_cloud/iteration_{}".format(str(iteration))
         )
     gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
+
+
+
+def save_cameras(save_dir, viewpoint_stack):
+    viewpoint_info = {}
+    uid_stack, R_stack, T_stack, fx_stack, fy_stack, kappa_stack = [], [], [], [], [], []
+    for viewpoint in viewpoint_stack:
+        uid = viewpoint.uid
+        R = viewpoint.R.cpu().numpy() if isinstance(R, torch.Tensor) else R
+        T = viewpoint.T.cpu().numpy() if isinstance(T, torch.Tensor) else T
+        fx = viewpoint.fx
+        fy = viewpoint.fy
+        kappa = viewpoint.kappa
+
+        uid_stack.append ( uid )
+        R_stack.append( R )
+        T_stack.append( T )
+        fx_stack.append( fx )
+        fy_stack.append( fy )
+        kappa_stack.append ( kappa )
+
+    viewpoint_info["uid"] = np.array(uid_stack)
+    viewpoint_info["R"] = R_stack
+    viewpoint_info["T"] = T_stack
+    viewpoint_info["fx"] = np.array(fx_stack)
+    viewpoint_info["fy"] = np.array(fy_stack)
+    viewpoint_info["kappa"] = np.array(kappa_stack)
+
+    json.dump(
+        viewpoint_info,
+        open(os.path.join(save_dir, "final_cameras.json"), "w", encoding="utf-8"),
+        indent=4,
+    )
+
+
+
