@@ -308,7 +308,8 @@ if __name__ == "__main__":
             project="MonoGS",
             name=f"{tmp}_{current_datetime}",
             config=config,
-            mode=None if config["Results"]["use_wandb"] else "disabled",
+            mode="disabled",
+            # mode=None if config["Results"]["use_wandb"] else "disabled"
         )
         wandb.define_metric("frame_idx")
         wandb.define_metric("ate*", step_metric="frame_idx")

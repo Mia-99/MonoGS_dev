@@ -77,8 +77,8 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
 
     def gen_pose_matrix(R, T):
         pose = np.eye(4)
-        pose[0:3, 0:3] = R.cpu().numpy()
-        pose[0:3, 3] = T.cpu().numpy()
+        pose[0:3, 0:3] = R.cpu().numpy() if isinstance(R, torch.Tensor) else R
+        pose[0:3, 3] = T.cpu().numpy() if isinstance(T, torch.Tensor) else T
         return pose
 
     for kf_id in kf_ids:
@@ -113,7 +113,7 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
         label=label_evo,
         monocular=monocular,
     )
-    wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
+    # wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
     return ate
 
 
@@ -139,7 +139,7 @@ def eval_rendering(
             continue
         saved_frame_idx.append(idx)
         frame = frames[idx]
-        gt_image, _, _ = dataset[idx]
+        gt_image, *_ = dataset[idx]
 
         rendering = render(frame, gaussians, pipe, background)["render"]
         image = torch.clamp(rendering, 0.0, 1.0)
