@@ -197,7 +197,7 @@ def save_gaussians(gaussians, name, iteration, final=False):
 
 
 
-def save_cameras(save_dir, iteration, viewpoint_dict, ATE_records):
+def save_cameras(save_dir, iteration, viewpoint_dict):
     viewpoint_info = {}
     uid_stack, R_stack, T_stack, fx_stack, fy_stack, kappa_stack, calib_id_stack = [], [], [], [], [], [], []
     for frame_idx, viewpoint in viewpoint_dict.items():
@@ -224,7 +224,6 @@ def save_cameras(save_dir, iteration, viewpoint_dict, ATE_records):
     viewpoint_info["fy"] = fy_stack
     viewpoint_info["kappa"] = kappa_stack
     viewpoint_info["calib_id"] = calib_id_stack
-    viewpoint_info["ATE"] = ATE_records
 
     camera_dir = os.path.join(save_dir, "cameras")
     mkdir_p( camera_dir )
@@ -235,3 +234,11 @@ def save_cameras(save_dir, iteration, viewpoint_dict, ATE_records):
     ) as f:
         json.dump(viewpoint_info, f, indent=4)
 
+
+def save_ATE_records(save_dir, ATE_records):
+    with open(
+        os.path.join(save_dir, "ATE_records"),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(ATE_records, f, indent=4)

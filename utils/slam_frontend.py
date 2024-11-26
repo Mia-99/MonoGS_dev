@@ -698,10 +698,13 @@ class FrontEnd(mp.Process):
             last_keyframe_idx = self.current_window[0]
             last_keyframe = self.cameras[last_keyframe_idx] # last keyframe (optimzied by backend)
             # last_frame = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
+            kf_calib = copy.deepcopy( [last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa] )            
             for frame_idx in range(last_keyframe_idx+self.use_every_n_frames, cur_frame_idx, self.use_every_n_frames):
                 frame = self.cameras[frame_idx]
                 if (frame.calibration_identifier == last_keyframe.calibration_identifier):
-                    frame.update_calibration (last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa)
+                    calib = kf_calib.copy()
+                    kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
+                    frame.update_calibration (kf_fx, kf_fy, kf_kappa)
     
 
 

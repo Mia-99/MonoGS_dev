@@ -15,7 +15,7 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from gui import gui_utils, slam_gui
 from utils.config_utils import load_config
 from utils.dataset import load_dataset
-from utils.eval_utils import save_gaussians, save_cameras
+from utils.eval_utils import save_gaussians, save_cameras, save_ATE_records
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
@@ -141,7 +141,13 @@ class SLAM:
         Log("Total time", start.elapsed_time(end) * 0.001, tag="Eval")
         Log("Total FPS", N_frames / (start.elapsed_time(end) * 0.001), tag="Eval")
         save_gaussians(self.frontend.gaussians, self.save_dir, iteration="before_opt", final=False)
-        save_cameras(self.save_dir, "final", self.frontend.cameras, self.frontend.ATE_records)
+        save_cameras(self.save_dir, "final", self.frontend.cameras)
+        save_ATE_records(self.save_dir, self.frontend.ATE_records)
+
+        #clean frontend images
+        for idx in self.frontend.cameras:
+            self.frontend.cleanup(idx)
+        torch.cuda.empty_cache()
 
         if self.eval_rendering:
             self.gaussians = self.frontend.gaussians
