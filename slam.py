@@ -140,8 +140,8 @@ class SLAM:
         FPS = N_frames / (start.elapsed_time(end) * 0.001)
         Log("Total time", start.elapsed_time(end) * 0.001, tag="Eval")
         Log("Total FPS", N_frames / (start.elapsed_time(end) * 0.001), tag="Eval")
-        save_gaussians(self.gaussians, self.save_dir, "final_before_opt", iteration=N_frames, final=False)
-        save_cameras(self.save_dir, self.frontend.cameras)
+        save_gaussians(self.frontend.gaussians, self.save_dir, iteration="before_opt", final=False)
+        save_cameras(self.save_dir, "final", self.frontend.cameras, self.frontend.ATE_records)
 
         if self.eval_rendering:
             self.gaussians = self.frontend.gaussians

@@ -390,7 +390,7 @@ class FrontEnd(mp.Process):
                             final=True,
                             monocular=self.monocular,
                         )
-                        self.ATE_records.append( (cur_frame_idx, ate) )
+                        self.ATE_records.append( {"kf_id": cur_frame_idx, "ate": ate} )
                         save_gaussians(
                             self.gaussians, self.save_dir, "final", final=True
                         )
@@ -581,7 +581,7 @@ class FrontEnd(mp.Process):
                         cur_frame_idx,
                         monocular=self.monocular,
                     )
-                    self.ATE_records.append( (cur_frame_idx, ate) )
+                    self.ATE_records.append( {"kf_id": cur_frame_idx, "ate": ate} )
                 toc.record()
                 torch.cuda.synchronize()
                 if create_kf:

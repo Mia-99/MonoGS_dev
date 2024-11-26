@@ -197,36 +197,41 @@ def save_gaussians(gaussians, name, iteration, final=False):
 
 
 
-def save_cameras(save_dir, viewpoint_stack):
+def save_cameras(save_dir, iteration, viewpoint_dict, ATE_records):
     viewpoint_info = {}
-    uid_stack, R_stack, T_stack, fx_stack, fy_stack, kappa_stack = [], [], [], [], [], []
-    for viewpoint in viewpoint_stack:
+    uid_stack, R_stack, T_stack, fx_stack, fy_stack, kappa_stack, calib_id_stack = [], [], [], [], [], [], []
+    for frame_idx, viewpoint in viewpoint_dict.items():
         uid = viewpoint.uid
-        R = viewpoint.R.cpu().numpy() if isinstance(R, torch.Tensor) else R
-        T = viewpoint.T.cpu().numpy() if isinstance(T, torch.Tensor) else T
+        R = viewpoint.R.cpu().numpy() if isinstance(viewpoint.R, torch.Tensor) else viewpoint.R
+        T = viewpoint.T.cpu().numpy() if isinstance(viewpoint.T, torch.Tensor) else viewpoint.T
         fx = viewpoint.fx
         fy = viewpoint.fy
         kappa = viewpoint.kappa
+        calib_id = viewpoint.calibration_identifier
 
         uid_stack.append ( uid )
-        R_stack.append( R )
-        T_stack.append( T )
+        R_stack.append( R.tolist() )
+        T_stack.append( T.tolist() )
         fx_stack.append( fx )
         fy_stack.append( fy )
         kappa_stack.append ( kappa )
+        calib_id_stack.append ( calib_id )
 
-    viewpoint_info["uid"] = np.array(uid_stack)
+    viewpoint_info["uid"] = uid_stack
     viewpoint_info["R"] = R_stack
     viewpoint_info["T"] = T_stack
-    viewpoint_info["fx"] = np.array(fx_stack)
-    viewpoint_info["fy"] = np.array(fy_stack)
-    viewpoint_info["kappa"] = np.array(kappa_stack)
+    viewpoint_info["fx"] = fx_stack
+    viewpoint_info["fy"] = fy_stack
+    viewpoint_info["kappa"] = kappa_stack
+    viewpoint_info["calib_id"] = calib_id_stack
+    viewpoint_info["ATE"] = ATE_records
 
-    json.dump(
-        viewpoint_info,
-        open(os.path.join(save_dir, "final_cameras.json"), "w", encoding="utf-8"),
-        indent=4,
-    )
-
-
+    camera_dir = os.path.join(save_dir, "cameras")
+    mkdir_p( camera_dir )
+    with open(
+        os.path.join(camera_dir, "iteration_{}.json".format(str(iteration))),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(viewpoint_info, f, indent=4)
 
