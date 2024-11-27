@@ -4,12 +4,23 @@ import glob
 
 
 office_configs = {}
+image_info="1200x680_f600"
 
-office_configs[0] =  glob.glob("configs/mono/replica/office0_1200x680_f600.yaml")
-office_configs[1] =  glob.glob("configs/mono/replica/office1_1200x680_f600.yaml")
-office_configs[2] =  glob.glob("configs/mono/replica/office2_1200x680_f600.yaml")
-office_configs[3] =  glob.glob("configs/mono/replica/office3_1200x680_f600.yaml")
-office_configs[4] =  glob.glob("configs/mono/replica/office4_1200x680_f600.yaml")
+if True:
+    # only selfcalibration data
+    office_configs[0] =  glob.glob(f"configs/mono/replica/office0_{image_info}_*.yaml")
+    office_configs[1] =  glob.glob(f"configs/mono/replica/office1_{image_info}_*.yaml")
+    office_configs[2] =  glob.glob(f"configs/mono/replica/office2_{image_info}_*.yaml")
+    office_configs[3] =  glob.glob(f"configs/mono/replica/office3_{image_info}_*.yaml")
+    office_configs[4] =  glob.glob(f"configs/mono/replica/office4_{image_info}_*.yaml")
+else:
+    # all data
+    office_configs[0] =  glob.glob(f"configs/mono/replica/office0_{image_info}*.yaml")
+    office_configs[1] =  glob.glob(f"configs/mono/replica/office1_{image_info}*.yaml")
+    office_configs[2] =  glob.glob(f"configs/mono/replica/office2_{image_info}*.yaml")
+    office_configs[3] =  glob.glob(f"configs/mono/replica/office3_{image_info}*.yaml")
+    office_configs[4] =  glob.glob(f"configs/mono/replica/office4_{image_info}*.yaml")
+
 
 for idx, configs in office_configs.items():
     print(f"\nRunning Office {idx}")

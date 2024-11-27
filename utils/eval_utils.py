@@ -237,7 +237,7 @@ def save_cameras(save_dir, iteration, viewpoint_dict):
 
 def save_ATE_records(save_dir, ATE_records):
     with open(
-        os.path.join(save_dir, "ATE_records"),
+        os.path.join(save_dir, "ATE_records.json"),
         "w",
         encoding="utf-8",
     ) as f:
