@@ -1,6 +1,7 @@
 
 import os
 import glob
+import torch
 
 
 office_configs = {}
@@ -26,7 +27,8 @@ for idx, configs in office_configs.items():
     print(f"\nRunning Office {idx}")
     print(f"=======================================================================================")
     for config_file_path in configs:
-        command = f"python slam.py --config {config_file_path} --eval"                      
+        torch.cuda.empty_cache()
+        command = f"python slam.py --config {config_file_path} --require_calibration --eval"
         print(f"Running: {command}")
         os.system(command)
     

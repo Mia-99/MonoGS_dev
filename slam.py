@@ -33,8 +33,8 @@ from utils_cali.eval_cali_utils import eval_ate, eval_rendering, save_gaussians_
 
 class OnlineCalibrationSettings:
     def __init__ (self):
-        self.require_calibration = True
-        self.allow_lens_distortion = True
+        self.require_calibration = False
+        self.allow_lens_distortion = False
         self.calib_module_test = False
 
 
