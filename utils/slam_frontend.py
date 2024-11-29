@@ -54,6 +54,7 @@ class FrontEnd(mp.Process):
         self.MODULE_TEST_CALIBRATION = False
         self.signal_calibration_change = False
         self.calibration_identifier = 0 # current calibration id
+        self.calibration_frame_idx = 0   # when curruent calibration takes effect
 
         # ATE array
         self.ATE_records = []
@@ -416,15 +417,17 @@ class FrontEnd(mp.Process):
                 # the camera notifies the frontend calibration that there exists carlibation change by
                 # passing a calibration_identifier > 0
                 # then frontend reset the right calibration identifier, by accumulating on the local calibration_identifier
-                if viewpoint.calibration_identifier > 0:  # expected value: 0, 1
-                    self.calibration_identifier += viewpoint.calibration_identifier
-                    if (not self.signal_calibration_change):
+                if viewpoint.calibration_identifier > 0:  # expected value: 0, 1                    
+                    if (not self.signal_calibration_change): # only do it once
+                        self.calibration_identifier += viewpoint.calibration_identifier
+                        self.calibration_frame_idx = cur_frame_idx                        
                         rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx}")
                         self.backend_queue.put(["calibration_change"])
                     self.signal_calibration_change = True
                 else:
                     self.signal_calibration_change = False
                 viewpoint.calibration_identifier = self.calibration_identifier
+                viewpoint.kappa = 0.0 # reset kappa to zero for new calibration
 
 
                 ###### test code block
@@ -455,7 +458,6 @@ class FrontEnd(mp.Process):
                     viewpoint.update_RT(prev.R, prev.T) # use last frame pose
 
                 if self.signal_calibration_change:
-                    viewpoint.kappa = 0.0 # reset kappa to zero for new calibration
                     if self.requested_keyframe > 0:
                         time.sleep(0.01)
                         continue
@@ -699,12 +701,12 @@ class FrontEnd(mp.Process):
             last_keyframe = self.cameras[last_keyframe_idx] # last keyframe (optimzied by backend)
             # last_frame = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
             kf_calib = copy.deepcopy( [last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa] )            
-            for frame_idx in range(last_keyframe_idx+self.use_every_n_frames, cur_frame_idx, self.use_every_n_frames):
+            for frame_idx in range(self.calibration_frame_idx, cur_frame_idx, self.use_every_n_frames):
                 frame = self.cameras[frame_idx]
-                if (frame.calibration_identifier == last_keyframe.calibration_identifier):
-                    calib = kf_calib.copy()
-                    kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
-                    frame.update_calibration (kf_fx, kf_fy, kf_kappa)
+                assert frame.calibration_identifier == last_keyframe.calibration_identifier
+                calib = kf_calib.copy()
+                kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
+                frame.update_calibration (kf_fx, kf_fy, kf_kappa)
     
 
 
