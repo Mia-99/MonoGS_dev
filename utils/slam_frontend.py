@@ -414,6 +414,26 @@ class FrontEnd(mp.Process):
                 )
                 viewpoint.compute_grad_mask(self.config)
 
+ 
+                ###### test code block
+                if self.MODULE_TEST_CALIBRATION:
+                    if cur_frame_idx == 100:
+                        viewpoint.calibration_identifier = 1 # calibration change
+                        focal_ref = 400
+                    elif cur_frame_idx == 200:
+                        viewpoint.calibration_identifier = 1 # calibration change
+                        focal_ref = 350
+                    elif cur_frame_idx == 300:
+                        viewpoint.calibration_identifier = 1 # calibration change
+                        focal_ref = 700
+                    elif cur_frame_idx == 400:
+                        viewpoint.calibration_identifier = 1 # calibration change
+                        focal_ref = 900
+                    else:
+                        viewpoint.calibration_identifier = 0 # no calibration change
+                        focal_ref = None
+
+
                 # the camera notifies the frontend calibration that there exists carlibation change by
                 # passing a calibration_identifier > 0
                 # then frontend reset the right calibration identifier, by accumulating on the local calibration_identifier
@@ -430,28 +450,6 @@ class FrontEnd(mp.Process):
                 viewpoint.kappa = 0.0 # reset kappa to zero for new calibration
 
 
-                ###### test code block
-                if self.MODULE_TEST_CALIBRATION:
-                    if cur_frame_idx < 100:
-                        viewpoint.calibration_identifier = 0
-                        focal_ref = None
-                    elif cur_frame_idx >= 100 and cur_frame_idx < 200:
-                        viewpoint.calibration_identifier = 1
-                        focal_ref = 400
-                    elif cur_frame_idx >= 200 and cur_frame_idx < 300:
-                        viewpoint.calibration_identifier = 2
-                        focal_ref = 350
-                    elif cur_frame_idx >= 300 and cur_frame_idx < 400:
-                        viewpoint.calibration_identifier = 3
-                        focal_ref = 700
-                    elif cur_frame_idx >= 400 and cur_frame_idx < 500:
-                        viewpoint.calibration_identifier = 4
-                        focal_ref = 900
-                    else:
-                        viewpoint.calibration_identifier = 4
-                        focal_ref = None
-                        
-                
                 if len(self.cameras) > self.use_every_n_frames:
                     prev = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
                     viewpoint.update_calibration (prev.fx, prev.fy, prev.kappa) # use last frame calibration
@@ -698,15 +696,22 @@ class FrontEnd(mp.Process):
     def sync_backend_calibration (self, cur_frame_idx):
         if len(self.current_window):
             last_keyframe_idx = self.current_window[0]
+            if last_keyframe_idx < self.calibration_frame_idx or self.calibration_frame_idx == 0:
+                return
+            print(f"{last_keyframe_idx=}")
+            print(f"{self.calibration_frame_idx=}")
+            print(f"{cur_frame_idx=}")
             last_keyframe = self.cameras[last_keyframe_idx] # last keyframe (optimzied by backend)
             # last_frame = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
-            kf_calib = copy.deepcopy( [last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa] )            
+            kf_calib = copy.deepcopy( [last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa] )
             for frame_idx in range(self.calibration_frame_idx, cur_frame_idx, self.use_every_n_frames):
                 frame = self.cameras[frame_idx]
-                assert frame.calibration_identifier == last_keyframe.calibration_identifier
+                assert frame.calibration_identifier == last_keyframe.calibration_identifier, f"{frame.calibration_identifier=}\t{last_keyframe.calibration_identifier=}"
+                # if frame.calibration_identifier == last_keyframe.calibration_identifier:
                 calib = kf_calib.copy()
                 kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
                 frame.update_calibration (kf_fx, kf_fy, kf_kappa)
     
+
 
 

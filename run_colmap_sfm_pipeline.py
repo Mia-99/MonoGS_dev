@@ -265,7 +265,7 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
     ## visualization
-    use_gui = False
+    use_gui = True
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
     sfm.require_calibration = True
     sfm.allow_lens_distortion = True
@@ -413,9 +413,9 @@ if __name__ == "__main__":
 
     results = {}
 
-    runSfMDebug = 0
-    runBatchExp = 1
-    runSaveRendering = 1
+    runSfMDebug = 1
+    runBatchExp = 0
+    runSaveRendering = 0
 
     GSS_iter = 0
 
@@ -430,7 +430,7 @@ if __name__ == "__main__":
                                                                                     phase2_DBA_iter = 20,
                                                                                     phase2_CaliDBA_iter = 6, 
                                                                                     phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=100,
+                                                                                    set_focal_error=10,
                                                                                     save_to_dir=os.path.join(os.getcwd(), "Debug/withCalib"))
         print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
         print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
