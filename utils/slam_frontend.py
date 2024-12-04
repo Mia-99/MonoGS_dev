@@ -485,7 +485,7 @@ class FrontEnd(mp.Process):
                 # TUNING PARAMETERS
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  beta = 0.0, learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False)
-                    self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 1.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
+                    self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
 
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
@@ -698,9 +698,9 @@ class FrontEnd(mp.Process):
             last_keyframe_idx = self.current_window[0]
             if last_keyframe_idx < self.calibration_frame_idx or self.calibration_frame_idx == 0:
                 return
-            print(f"{last_keyframe_idx=}")
-            print(f"{self.calibration_frame_idx=}")
-            print(f"{cur_frame_idx=}")
+            # print(f"{last_keyframe_idx=}")
+            # print(f"{self.calibration_frame_idx=}")
+            # print(f"{cur_frame_idx=}")
             last_keyframe = self.cameras[last_keyframe_idx] # last keyframe (optimzied by backend)
             # last_frame = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
             kf_calib = copy.deepcopy( [last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa] )
