@@ -29,6 +29,7 @@ for idx, configs in office_configs.items():
     for config_file_path in configs:
         torch.cuda.empty_cache()
         command = f"python slam.py --config {config_file_path} --require_calibration --eval"
+        command = f"python slam.py --config {config_file_path} --require_calibration"
         print(f"Running: {command}")
         os.system(command)
     
