@@ -142,10 +142,21 @@ class FrontEnd(mp.Process):
         self.request_init(cur_frame_idx, viewpoint, depth_map)
         self.reset = False
 
-    def tracking(self, cur_frame_idx, viewpoint, continue_optimize=False):
-        if (not continue_optimize):
-            prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
-            viewpoint.update_RT(prev.R, prev.T)
+    def tracking(self, cur_frame_idx, viewpoint, focal_optimizer_type=None, learning_rate=0.001):
+
+        # add calibration optimizer in tracking
+        calibration_optimizers = None
+        if focal_optimizer_type is not None:
+            viewpoint_stack = [ viewpoint ]
+            H = viewpoint.image_height
+            W = viewpoint.image_width
+            focal_ref = np.sqrt(H*H + W*W)/2
+            calibration_optimizers = CalibrationOptimizer(viewpoint_stack, focal_ref, focal_optimizer_type= focal_optimizer_type)
+            rich.print(f"[bold green]Initialize focal length optimizer: {focal_optimizer_type}, lr = {learning_rate} [/bold green]")
+            calibration_optimizers.update_focal_learning_rate(lr = learning_rate)
+
+        prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
+        viewpoint.update_RT(prev.R, prev.T)
         
         opt_params = []
         opt_params.append(
@@ -194,6 +205,8 @@ class FrontEnd(mp.Process):
             loss_tracking.backward()
 
             with torch.no_grad():
+                if calibration_optimizers is not None:
+                    calibration_optimizers.focal_step() # add update focal
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
 
@@ -483,16 +496,15 @@ class FrontEnd(mp.Process):
 
 
                 # TUNING PARAMETERS
+                tracking_focal_optimizer_type = None
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  beta = 0.0, learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False)
                     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
+                    tracking_focal_optimizer_type = 'SGD'
 
-                render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = tracking_focal_optimizer_type, learning_rate=0.001)
 
-                # if self.require_calibration and self.initialized and self.signal_calibration_change:
-                #     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
-                #     render_pkg = self.tracking(cur_frame_idx, viewpoint, continue_optimize=True) # render again with the best parameters
-    
+
 
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
@@ -690,7 +702,6 @@ class FrontEnd(mp.Process):
                     break
 
         return calibration_optimizers.estimate_step_size()
-    
     
 
     def sync_backend_calibration (self, cur_frame_idx):
