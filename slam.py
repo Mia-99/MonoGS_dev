@@ -244,14 +244,16 @@ if __name__ == "__main__":
     # np.random.seed(0)
     # torch.manual_seed(0)
 
-
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
-    parser.add_argument("--config", type=str)
-    parser.add_argument("--eval", action="store_true")
-    parser.add_argument("--require_calibration", action="store_true", default=False)
-    parser.add_argument("--allow_lens_distortion", action="store_true", default=False)
-    parser.add_argument("--calib_module_test", action="store_true", default=False)
+    parser.add_argument("--config", type=str, help='path to slam config file')
+    parser.add_argument("--eval", action="store_true", default=False, help='default=False. evaluation mode which performs 3DGS refinement after completing SLAM')
+    parser.add_argument("--calib_module_test", action="store_true", default=False, help='default=False. module test of selfcalibration')
+
+    # options to overwrite config for test purpurses    
+    parser.add_argument("--disable_selfcalibration", action="store_true", default=False, help='default=False. force to disable selfcalibration and overwrite config file') # overwrite config
+    parser.add_argument("--disable_gui", action="store_true", default=False, help='default=False. force to disable gui') # overwrite config
+    
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -265,19 +267,25 @@ if __name__ == "__main__":
 
     calib_opts = OnlineCalibrationSettings()
 
-    # config control params
+    # selfcalibration control params in config
     if 'SelfCalibration' in config['Dataset'].keys():
-        print(f"selfCalibration:\n\t{ config['Dataset']['SelfCalibration'] }")
         calib_opts.require_calibration = config['Dataset']['SelfCalibration']['enabled']
         calib_opts.allow_lens_distortion = True if config['Dataset']['SelfCalibration']['radial_distortion'] == 1 else False
-        # print(f"calib_opts.require_calibration= {calib_opts.require_calibration}")
-        # print(f"calib_opts.allow_lens_distortion = {calib_opts.allow_lens_distortion }")
-        # sys.exit()
 
-    # argument control params
-    calib_opts.require_calibration = args.require_calibration
-    calib_opts.allow_lens_distortion = args.require_calibration and args.allow_lens_distortion # activated only when require_calibration = True
-    calib_opts.calib_module_test = args.calib_module_test
+    # test mode
+    if args.calib_module_test:
+        calib_opts.require_calibration = True
+        calib_opts.allow_lens_distortion = True
+        calib_opts.calib_module_test = True
+        
+    # disable selfcalibration
+    if args.disable_selfcalibration:
+        calib_opts.require_calibration = False
+        calib_opts.allow_lens_distortion = False
+
+    # disable gui
+    if args.disable_gui:
+        config["Results"]["use_gui"] = False
 
 
     if args.eval:
@@ -294,6 +302,7 @@ if __name__ == "__main__":
         Log("\trequire_calibration=" + str(calib_opts.require_calibration))
         Log("\tallow_lens_distortion=" + str(calib_opts.allow_lens_distortion))
         Log("\tcalib_module_test=" + str(calib_opts.calib_module_test))
+
 
     if config["Results"]["save_results"]:
         mkdir_p(config["Results"]["save_dir"])
@@ -324,8 +333,6 @@ if __name__ == "__main__":
         )
         wandb.define_metric("frame_idx")
         wandb.define_metric("ate*", step_metric="frame_idx")
-
-
 
 
 
