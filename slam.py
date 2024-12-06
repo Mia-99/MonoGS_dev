@@ -31,6 +31,22 @@ from gaussian_viewer import Viewer, create_gaussians_gl
 from utils_cali.eval_cali_utils import eval_ate, eval_rendering, save_gaussians_class, save_cali
 
 
+import shutil
+
+def delete_files_and_subdirectories(directory_path):
+   try:
+     with os.scandir(directory_path) as entries:
+       for entry in entries:
+         if entry.is_file():
+            os.unlink(entry.path)
+         else:
+            shutil.rmtree(entry.path)
+     print("All files and subdirectories deleted successfully.")
+   except OSError:
+     print("Error occurred while deleting files and subdirectories.")
+
+
+
 class OnlineCalibrationSettings:
     def __init__ (self):
         self.require_calibration = False
@@ -320,6 +336,7 @@ if __name__ == "__main__":
         config["calib_opts_require_calibration"] = calib_opts.require_calibration
         config["calib_opts_allow_lens_distortion"] = calib_opts.allow_lens_distortion
         config["calib_module_test"] = calib_opts.calib_module_test
+        delete_files_and_subdirectories(save_dir)
         mkdir_p(save_dir)
         with open(os.path.join(save_dir, "config.yml"), "w") as file:
             documents = yaml.dump(config, file)

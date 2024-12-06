@@ -402,6 +402,7 @@ class BackEnd(mp.Process):
         print(f"\n\nCalibration results")
         for cam_id, viewpoint in self.viewpoints.items():
             print(f"cam_id: {cam_id}: \tcalib_id: {viewpoint.calibration_identifier}: fx = {viewpoint.fx:.3f}, fy = {viewpoint.fy:.3f}, kappa = {viewpoint.kappa:.6f}")        
+        return
 
 
     def run(self):
@@ -428,6 +429,7 @@ class BackEnd(mp.Process):
             else:
                 data = self.backend_queue.get()
                 if data[0] == "stop":
+                    self.save_calib_results()
                     break
                 elif data[0] == "pause":
                     self.pause = True
@@ -556,7 +558,7 @@ class BackEnd(mp.Process):
                         H = viewpoint.image_height
                         W = viewpoint.image_width
                         focal_ref = np.sqrt(H*H + W*W)/2
-                        focal_optimizer_type="Adam" if (self.calibration_identifier_cnt==2) else "SGD"
+                        focal_optimizer_type="Adam" if (self.calibration_identifier_cnt==2 or self.calibration_identifier_cnt==10) else "SGD"
                         window_id_cnt = sum(i >= self.calibration_keyframe_idx for i in self.current_window)
                         self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type=focal_optimizer_type)
                         self.calibration_optimizers.num_line_elements = 0 # sample points for line fitting
@@ -576,13 +578,13 @@ class BackEnd(mp.Process):
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*3) # more iters for two views
 
                         elif (self.calibration_identifier_cnt == 10): # number of keyframes after calibration change
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.0002) # SGD
+                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt1) # Adam
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*3) # BA with full window
                             self.calibration_initialized = True
                             Log("Calibration Initialized")
                             
                         else:
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.0002) # SGD
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.0001) # SGD
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
                     else:
                         self.map(self.current_window, iters=iter_per_kf)
@@ -600,20 +602,11 @@ class BackEnd(mp.Process):
                     rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calibration_identifier}, iter_per_kf: {iter_per_kf}\n")
                     self.push_to_frontend("keyframe")
 
-                    # add depth points at last, because these points will not be optimized with one view.
-                    # if (self.signal_calibration_change):
-                    #     self.add_next_kf(cur_frame_idx, self.viewpoints[cur_frame_idx], depth_map=depth_map) 
-                    #     self.map(self.current_window, calibrate=False, iters=iter_per_kf) # don't calibrate with one view. optimize gaussian
-                    #     # self.map(self.current_window, prune=True)
-
-
                 else:
                     raise Exception("Unprocessed data", data)
         
-        self.save_calib_results()
-
         while not self.backend_queue.empty():
             self.backend_queue.get()
         while not self.frontend_queue.empty():
-            self.frontend_queue.get()
+            self.frontend_queue.get()        
         return
