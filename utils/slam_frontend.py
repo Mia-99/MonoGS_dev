@@ -20,6 +20,9 @@ from gaussian_scale_space import image_conv_gaussian_separable
 import copy
 import rich
 
+import matplotlib.pyplot as plt
+import os
+from gaussian_splatting.utils.system_utils import mkdir_p
 
 class FrontEnd(mp.Process):
     def __init__(self, config):
@@ -51,6 +54,7 @@ class FrontEnd(mp.Process):
 
         # calibration control params
         self.require_calibration = False
+        self.allow_lens_distortion = False
         self.MODULE_TEST_CALIBRATION = False
         self.signal_calibration_change = False
         self.calibration_identifier = 0 # current calibration id
@@ -155,9 +159,11 @@ class FrontEnd(mp.Process):
             rich.print(f"[bold green]Initialize focal length optimizer: {focal_optimizer_type}, lr = {learning_rate} [/bold green]")
             calibration_optimizers.update_focal_learning_rate(lr = learning_rate)
 
-        prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
-        viewpoint.update_RT(prev.R, prev.T)
-        
+        # prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
+        # viewpoint.update_RT(prev.R, prev.T)
+        # print(f"len(self.cameras) = {len(self.cameras)},  cur_frame_idx = {cur_frame_idx},  self.use_every_n_frames = {self.use_every_n_frames}")
+        # print(f"prev = {prev.uid},   viewpoint = {viewpoint.uid}")
+
         opt_params = []
         opt_params.append(
             {
@@ -207,6 +213,9 @@ class FrontEnd(mp.Process):
             with torch.no_grad():
                 if calibration_optimizers is not None:
                     calibration_optimizers.focal_step() # add update focal
+                    # if self.allow_lens_distortion and tracking_itr > 10:
+                    #     calibration_optimizers.kappa_step() # add update kappa
+                    calibration_optimizers.zero_grad(set_to_none=True)
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
 
@@ -460,18 +469,16 @@ class FrontEnd(mp.Process):
                 else:
                     self.signal_calibration_change = False
                 viewpoint.calibration_identifier = self.calibration_identifier
-                viewpoint.kappa = 0.0 # reset kappa to zero for new calibration
 
-
-                if len(self.cameras) > self.use_every_n_frames:
+                if (not self.reset):
                     prev = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
                     viewpoint.update_calibration (prev.fx, prev.fy, prev.kappa) # use last frame calibration
                     viewpoint.update_RT(prev.R, prev.T) # use last frame pose
 
-                if self.signal_calibration_change:
-                    if self.requested_keyframe > 0:
-                        time.sleep(0.01)
-                        continue
+                # if self.signal_calibration_change:
+                #     if self.requested_keyframe > 0:
+                #         time.sleep(0.01)
+                #         continue
 
 
                 ###### test code block
@@ -496,14 +503,15 @@ class FrontEnd(mp.Process):
 
 
                 # TUNING PARAMETERS
-                tracking_focal_optimizer_type = None
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
-                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  beta = 0.0, learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False)
-                    self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  beta = 0.0, learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
-                    tracking_focal_optimizer_type = 'SGD'
+                    save_info = "frame"+str(cur_frame_idx)
+                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False, save_info=save_info)
+                    self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
 
-                render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = tracking_focal_optimizer_type, learning_rate=0.001)
-
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.001)
+                else:
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
 
                 current_window_dict = {}
@@ -622,7 +630,7 @@ class FrontEnd(mp.Process):
 
 
     
-    def init_focal (self, viewpoint, optimizer_type = "Adam", gaussian_scale_t = 5.0, beta = 1.0, learning_rate = 0.1, max_iter_num = 20, step_safe_guard = False):
+    def init_focal (self, viewpoint, optimizer_type = "Adam", gaussian_scale_t = 5.0, learning_rate = 0.1, max_iter_num = 20, step_safe_guard = False, save_info=None):
 
         viewpoint_stack = []
         viewpoint_stack.append(viewpoint)
@@ -636,7 +644,26 @@ class FrontEnd(mp.Process):
         rich.print(f"[bold green]Initialize focal length optimizer: {optimizer_type}, lr = {learning_rate} [/bold green]")
         calibration_optimizers.update_focal_learning_rate(lr = learning_rate)
 
-        rgb_boundary_threshold = 0.01
+        rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
+
+        gt_image = viewpoint.original_image.cuda()
+        _, h, w = gt_image.shape
+        mask_shape = (1, h, w)
+        rgb_pixel_mask = (gt_image.sum(dim=0) > rgb_boundary_threshold).view(*mask_shape)
+        # rgb_pixel_mask = rgb_pixel_mask * viewpoint.grad_mask # don't apply gradient mask
+
+        # Gaussian scale space
+        gt_image_scale_t = image_conv_gaussian_separable( (gt_image * rgb_pixel_mask), sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else (gt_image * rgb_pixel_mask)
+
+
+        if save_info is not None:
+            img_dir = os.path.join(self.save_dir, "images", str(save_info))
+            mkdir_p(img_dir)
+            self.save_tensor2rgb(gt_image, os.path.join(img_dir, "gt_image.png") )
+            self.save_tensor2rgb(gt_image_scale_t, os.path.join(img_dir, "gt_image_scale_t.png") )
+            self.save_tensor2rgb(rgb_pixel_mask, os.path.join(img_dir, "rgb_pixel_mask.png") )
+            self.save_tensor2rgb(viewpoint.grad_mask, os.path.join(img_dir, "viewpoint_grad_mask.png") )
+
 
         loss_prev = 1e10
 
@@ -662,20 +689,23 @@ class FrontEnd(mp.Process):
                 render_pkg["opacity"],
             )
 
-            gt_image = viewpoint.original_image.cuda() 
-            mask = (gt_image.sum(dim=0) > rgb_boundary_threshold)
+            # not really necessary
+            image_ab = (torch.exp(viewpoint.exposure_a)) * image + viewpoint.exposure_b
+     
+            # Gaussian scale space
+            image_scale_t = image_conv_gaussian_separable((image_ab * rgb_pixel_mask), sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else (image_ab * rgb_pixel_mask)            
 
-            # loss function
-            if gaussian_scale_t > 0.5: # Gaussian scale space 
-                image_scale_t = image_conv_gaussian_separable(image, sigma=gaussian_scale_t, epsilon=0.01)
-                gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=gaussian_scale_t, epsilon=0.01)
-            else:
-                image_scale_t = image
-                gt_image_scale_t = gt_image
+            l1 = opacity * torch.abs(image_scale_t*rgb_pixel_mask - gt_image_scale_t*rgb_pixel_mask)
+            loss = l1.mean()
 
-            
-            huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = beta) # beta = 0, this becomes l1 loss
-            loss = huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
+            if save_info is not None:
+                postfix = "_itr"+str(itr)+"_focal"+str(viewpoint.fx)+".png"
+                img_dir = os.path.join(self.save_dir, "images", str(save_info))
+                self.save_tensor2rgb(image, os.path.join(img_dir, "image"+postfix) )
+                # self.save_tensor2rgb(image_ab, os.path.join(img_dir, "image_ab"+postfix) )
+                self.save_tensor2rgb(image_scale_t, os.path.join(img_dir, "image_scale_t"+postfix) )
+                self.save_tensor2rgb(opacity, os.path.join(img_dir, "opacity"+postfix) )
+
             
             # print(f"focal_init: iter: [{itr}]")
             if step_safe_guard and (loss > loss_prev):
@@ -693,7 +723,8 @@ class FrontEnd(mp.Process):
                 loss_prev = loss
 
             # clear old gradient, and compute new gradient
-            calibration_optimizers.zero_grad(set_to_none=True)
+            with torch.no_grad():
+                calibration_optimizers.zero_grad(set_to_none=True)
             loss.backward()
             
             with torch.no_grad():
@@ -725,4 +756,20 @@ class FrontEnd(mp.Process):
     
 
 
+    @staticmethod
+    def save_tensor2rgb (torch_tensor, filename="test.png"):
+        image = torch_tensor.squeeze().squeeze()
+        if not (image.ndim == 2 or image.ndim == 3):
+            return
+        if image.ndim == 2:
+            image = image.unsqueeze(0).repeat(3, 1, 1)
+        '''
+            Torch Image: 3*M*N
+            Numpy Image: M*N*3 [RGB]
+            OpenCV stores images in BGR order instead of RGB
+            plt.imshow(cv2.cvtColor(image,cv2.COLOR_BGR2RGB))
+        '''
+        image = torch.clamp(image, min=0, max=1.0) * 255
+        rgb = image.byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        plt.imsave(filename, rgb)
 

@@ -114,6 +114,7 @@ class SLAM:
         # online calibration control
         self.frontend.MODULE_TEST_CALIBRATION = calib_opts.calib_module_test # for test and debugging, using --calib_module_test
         self.frontend.require_calibration = calib_opts.require_calibration
+        self.frontend.allow_lens_distortion = calib_opts.allow_lens_distortion
         self.frontend.set_hyperparams()
 
         self.backend.gaussians = self.gaussians
@@ -160,12 +161,12 @@ class SLAM:
         save_cameras(self.save_dir, "final", self.frontend.cameras)
         save_ATE_records(self.save_dir, self.frontend.ATE_records)
 
-        #clean frontend images
-        for idx in self.frontend.cameras:
-            self.frontend.cleanup(idx)
-        torch.cuda.empty_cache()
-
         if self.eval_rendering:
+            #clean frontend images
+            for idx in self.frontend.cameras:
+                self.frontend.cleanup(idx)
+            torch.cuda.empty_cache()
+
             self.gaussians = self.frontend.gaussians
             kf_indices = self.frontend.kf_indices
             ATE = eval_ate(
