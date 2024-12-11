@@ -505,11 +505,12 @@ class FrontEnd(mp.Process):
                 # TUNING PARAMETERS
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
                     save_info = "frame"+str(cur_frame_idx)
-                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False, save_info=save_info)
+                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  learning_rate = 0.1, max_iter_num = 10, step_safe_guard = False, save_info=save_info)
+                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 5.0,  learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False)
                     self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
 
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint)
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.001)
+                    # render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.002)
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
