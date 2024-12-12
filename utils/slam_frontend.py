@@ -505,12 +505,20 @@ class FrontEnd(mp.Process):
                 # TUNING PARAMETERS
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
                     save_info = "frame"+str(cur_frame_idx)
-                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 10.0,  learning_rate = 0.1, max_iter_num = 10, step_safe_guard = False, save_info=save_info)
-                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", gaussian_scale_t = 5.0,  learning_rate = 0.1, max_iter_num = 30, step_safe_guard = False)
-                    self.init_focal (viewpoint, optimizer_type = "SGD", gaussian_scale_t = 0.0,  learning_rate = lr, max_iter_num = 20, step_safe_guard = True)
 
-                    # render_pkg = self.tracking(cur_frame_idx, viewpoint)
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.002)
+                    # coarse scale
+                    # lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 10.0, learning_rate = 0.1,   max_iter_num = 30, step_safe_guard = False, save_info=save_info)
+
+                    # Adam+SGD, at the same scale
+                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 5.0,  learning_rate = 0.05,  max_iter_num = 20, step_safe_guard = False, save_info=save_info)
+                    lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = 5.0,  learning_rate = lr,    max_iter_num = 20, step_safe_guard = True )
+
+                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 1.0,  learning_rate = 0.01,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
+                    # lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = 1.0,  learning_rate = 0.005,  max_iter_num = 10, step_safe_guard = False )
+                    # use image gradient and refine at scale 0?
+                    # lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.001, max_iter_num = 20, step_safe_guard = False )
+
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.001)
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
@@ -631,7 +639,7 @@ class FrontEnd(mp.Process):
 
 
     
-    def init_focal (self, viewpoint, optimizer_type = "Adam", gaussian_scale_t = 5.0, learning_rate = 0.1, max_iter_num = 20, step_safe_guard = False, save_info=None):
+    def init_focal (self, viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 5.0, learning_rate = 0.1, max_iter_num = 20, step_safe_guard = False, save_info=None):
 
         viewpoint_stack = []
         viewpoint_stack.append(viewpoint)
@@ -651,10 +659,11 @@ class FrontEnd(mp.Process):
         _, h, w = gt_image.shape
         mask_shape = (1, h, w)
         rgb_pixel_mask = (gt_image.sum(dim=0) > rgb_boundary_threshold).view(*mask_shape)
-        # rgb_pixel_mask = rgb_pixel_mask * viewpoint.grad_mask # don't apply gradient mask
+        if image_grad_mask:
+            rgb_pixel_mask = rgb_pixel_mask * viewpoint.grad_mask # don't apply gradient mask with Gaussian scale space
 
         # Gaussian scale space
-        gt_image_scale_t = image_conv_gaussian_separable( (gt_image * rgb_pixel_mask), sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else (gt_image * rgb_pixel_mask)
+        gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else gt_image
 
 
         if save_info is not None:
@@ -694,13 +703,12 @@ class FrontEnd(mp.Process):
             image_ab = (torch.exp(viewpoint.exposure_a)) * image + viewpoint.exposure_b
      
             # Gaussian scale space
-            image_scale_t = image_conv_gaussian_separable((image_ab * rgb_pixel_mask), sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else (image_ab * rgb_pixel_mask)            
+            image_scale_t = image_conv_gaussian_separable(image_ab, sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else image_ab
 
-            l1 = opacity * torch.abs(image_scale_t*rgb_pixel_mask - gt_image_scale_t*rgb_pixel_mask)
-            loss = l1.mean()
+            loss = ( opacity * torch.abs(image_scale_t*rgb_pixel_mask - gt_image_scale_t*rgb_pixel_mask) ).mean()
 
             if save_info is not None:
-                postfix = "_itr"+str(itr)+"_focal"+str(viewpoint.fx)+".png"
+                postfix = "_scale"+str(gaussian_scale_t) + "_itr"+str(itr)+"_focal"+str(viewpoint.fx)+".png"
                 img_dir = os.path.join(self.save_dir, "images", str(save_info))
                 self.save_tensor2rgb(image, os.path.join(img_dir, "image"+postfix) )
                 # self.save_tensor2rgb(image_ab, os.path.join(img_dir, "image_ab"+postfix) )
@@ -710,7 +718,7 @@ class FrontEnd(mp.Process):
             
             # print(f"focal_init: iter: [{itr}]")
             if step_safe_guard and (loss > loss_prev):
-                rich.print(f"[bold yellow][Warning]: learning rate is too big! revoke previous step and shrink learning rate[/bold yellow]")
+                rich.print(f"[bold yellow][Warning]: loss={loss:.8f}, loss_prev={loss_prev:.8f}. revoke previous step and shrink learning rate[/bold yellow]")
                 # print(f"loss_prev = {loss_prev},   loss = {loss},   current_fx = {viewpoint.fx}")
                 calibration_optimizers.undo_focal_step()
                 # print(f"\t after revoling, current_fx = {viewpoint.fx}")

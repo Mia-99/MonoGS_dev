@@ -245,7 +245,7 @@ class BackEnd(mp.Process):
 
             scaling = self.gaussians.get_scaling
             isotropic_loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1))
-            loss_mapping += 10 * isotropic_loss.mean()
+            loss_mapping += 10 * isotropic_loss.mean()  if (not calibrate) else 0 # 0.01*self.gaussians.get_opacity.mean() # loss to enhance sparsity
             loss_mapping.backward()
             gaussian_split = False
             ## Deinsifying / Pruning Gaussians
@@ -336,6 +336,9 @@ class BackEnd(mp.Process):
                 for cam_idx in range(min(frames_to_optimize, len(current_window))):
                     viewpoint = viewpoint_stack[cam_idx]
                     if viewpoint.uid == 0:
+                        continue
+                    if calibrate and current_window[cam_idx] < self.calibration_keyframe_idx:
+                        print(f"skip keyframe {current_window[cam_idx]} for < {self.calibration_keyframe_idx}")
                         continue
                     update_pose(viewpoint)
 
@@ -457,10 +460,13 @@ class BackEnd(mp.Process):
                     render_pkg["render"],
                     render_pkg["depth"],
                     render_pkg["opacity"]
-                )           
+                )
                 loss += get_loss_mapping(
                     self.config, image, depth, viewpoint, opacity
                 )
+                # loss += get_loss_tracking(
+                #     self.config, image, depth, opacity, viewpoint
+                # )
             loss.backward()
 
             with torch.no_grad():
@@ -500,7 +506,7 @@ class BackEnd(mp.Process):
                 #     continue
                 self.map(self.current_window)
                 if self.last_sent >= 10:
-                    self.map(self.current_window, prune=True, calibrate=False, iters=10)
+                    self.map(self.current_window, prune=True, iters=10)
                     self.push_to_frontend()
                     rich.print("[bold yellow]Backend : no data from front-end, continue optimizing existing data [/bold yellow]")
             else:
@@ -531,12 +537,13 @@ class BackEnd(mp.Process):
 
                 elif data[0] == "calibration_change":
                     rich.print("[bold red]Backend : calibration change signal recieved [/bold red]")
-                    self.map(self.current_window, prune=True, iters=10) # to perform excessive pruning
-                    # self.map(self.current_window, prune=False, iters=1, force_densify_prune=True) # force densification and split
-                    self.map(self.current_window, prune=False, iters=10) # optimize Gaussian parameters only
-                    self.map(self.current_window, prune=True, iters=1) # prune
+                    self.map(self.current_window, prune=True, iters=10) # prune floating 3D Gaussians
                     self.push_to_frontend()
-                    rich.print("[bold red]Backend : Gaussians optimized for calibration [/bold red]")
+                    # self.map(self.current_window, prune=True, iters=10) # to perform excessive pruning
+                    # self.map(self.current_window, prune=False, iters=10) # optimize Gaussian parameters only
+                    # self.map(self.current_window, prune=True, iters=1) # prune
+                    # self.push_to_frontend()
+                    # rich.print("[bold red]Backend : Gaussians optimized for calibration [/bold red]")
 
                 elif data[0] == "keyframe":
                     cur_frame_idx = data[1]
@@ -632,30 +639,42 @@ class BackEnd(mp.Process):
 
                     
                     if self.require_calibration and self.initialized and (not self.calibration_initialized):
+                        n_view_calib = 5
+                        frames_to_optimize = self.config["Training"]["pose_window"]
+                        n_view_calib = min(n_view_calib, frames_to_optimize)
+
                         H = viewpoint.image_height
                         W = viewpoint.image_width
                         focal_ref = np.sqrt(H*H + W*W)/2
-                        focal_optimizer_type="Adam" if (self.calibration_identifier_cnt==2) else "SGD"
+                        focal_optimizer_type="Adam" if (self.calibration_identifier_cnt in [2, n_view_calib]) else "SGD"
                         window_id_cnt = sum(i >= self.calibration_keyframe_idx for i in self.current_window)
-                        self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type=focal_optimizer_type)
-                        self.calibration_optimizers.num_line_elements = 0 # sample points for line fitting
+                        self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type=focal_optimizer_type)                        
                         rich.print(f"[bold green]{focal_optimizer_type} calibration optimizer[/bold green]:\n\tcurrent_window: {self.current_window}\n\tcalibration_keyframe_idx: {self.calibration_keyframe_idx}\n\tno. calibration views in window: {window_id_cnt}/{self.calibration_identifier_cnt}")
 
-                        if (self.calibration_identifier_cnt == 1): # Don't update calibration with one view                            
-                            self.map(self.current_window, iters=iter_per_kf)
-
-                        elif (self.calibration_identifier_cnt == 2):
-                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt1) # Adam
-                            self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*3) # more iters for two views
+                        self.map(self.current_window, iters=iter_per_kf)
+                        
+                        # number of keyframes after calibration change
+                        if (self.calibration_identifier_cnt == n_view_calib):
+                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt1*0.5)
+                            self.map(self.current_window, calibrate=True, iters=iter_per_kf)
                             
-                        else:
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.001 / window_id_cnt) # SGD
-                            self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf)
-
-                        if (self.calibration_identifier_cnt == 10): # number of keyframes after calibration change
-                            self.multiview_calibration_refinement(iters=iter_per_kf*3, focal_optimizer_type="SGD", lr=0.001/10) # Fixed Gaussians, optimize cameras with all collected keyframes corresponding to new calibration
+                            self.multiview_calibration_refinement(iters=iter_per_kf, focal_optimizer_type="SGD", lr=0.002/n_view_calib) # Fixed Gaussians, optimize cameras with all collected keyframes corresponding to new calibration
                             self.calibration_initialized = True
                             Log("Calibration Initialized")
+
+                        # elif (self.calibration_identifier_cnt == 1): # Don't update calibration with one view
+                        #     pass
+
+                        elif (self.calibration_identifier_cnt == 2):
+                            self.calibration_optimizers.update_focal_learning_rate(lr = self.lr_cnt1) # Adam lr
+                            self.map(self.current_window, calibrate=True, iters=iter_per_kf)
+
+                        else:
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.001 / window_id_cnt) # SGD lr
+                            self.map(self.current_window, calibrate=True, iters=iter_per_kf)
+
+                        self.map(self.current_window, prune=True, iters=10) # prune floating 3D Gaussians
+
 
                         # update all cameras with the most recent calibration_identifier
                         cur_keyframe = self.viewpoints[cur_frame_idx]
