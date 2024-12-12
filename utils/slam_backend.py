@@ -337,9 +337,14 @@ class BackEnd(mp.Process):
                     viewpoint = viewpoint_stack[cam_idx]
                     if viewpoint.uid == 0:
                         continue
-                    if calibrate and current_window[cam_idx] < self.calibration_keyframe_idx:
-                        print(f"skip keyframe {current_window[cam_idx]} for < {self.calibration_keyframe_idx}")
-                        continue
+                    if (not self.calibration_initialized): # calibration phase
+                        if calibrate and current_window[cam_idx] < self.calibration_keyframe_idx:
+                            print(f"calibrate: YES. skip keyframe {current_window[cam_idx]} for < {self.calibration_keyframe_idx}")
+                            continue
+                        if (not calibrate) and current_window[cam_idx] >= self.calibration_keyframe_idx:
+                            print(f"calibrate:  NO. skip keyframe {current_window[cam_idx]} for >= {self.calibration_keyframe_idx}")
+                            continue
+
                     update_pose(viewpoint)
 
                 # Structure (3D Gaussian) update
