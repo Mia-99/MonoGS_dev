@@ -507,14 +507,14 @@ class FrontEnd(mp.Process):
                     save_info = "frame"+str(cur_frame_idx)
 
                     # coarse scale
-                    # lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 10.0, learning_rate = 0.1,   max_iter_num = 30, step_safe_guard = False, save_info=save_info)
+                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 10.0, learning_rate = 0.1,   max_iter_num = 30, step_safe_guard = False, save_info=save_info)
 
                     # Adam+SGD, at the same scale
-                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 5.0,  learning_rate = 0.05,  max_iter_num = 20, step_safe_guard = False, save_info=save_info)
+                    lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 5.0,  learning_rate = 0.02,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
                     lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = 5.0,  learning_rate = lr,    max_iter_num = 20, step_safe_guard = True )
 
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 1.0,  learning_rate = 0.01,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
-                    # lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = 1.0,  learning_rate = 0.005,  max_iter_num = 10, step_safe_guard = False )
+                    lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = 1.0,  learning_rate = lr,    max_iter_num = 20, step_safe_guard = True )
                     # use image gradient and refine at scale 0?
                     # lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.001, max_iter_num = 20, step_safe_guard = False )
 
