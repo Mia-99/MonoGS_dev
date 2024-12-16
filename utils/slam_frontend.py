@@ -57,8 +57,9 @@ class FrontEnd(mp.Process):
         self.allow_lens_distortion = False
         self.MODULE_TEST_CALIBRATION = False
         self.signal_calibration_change = False
-        self.calibration_identifier = 0 # current calibration id
-        self.calibration_frame_idx = 0   # when curruent calibration takes effect
+        self.calib_id = 0 # current calibration id
+        self.calibration_frame_idx = 0   # when current calibration takes effect
+        self.calibration_keyframe_sent = True
 
         # ATE array
         self.ATE_records = []
@@ -194,8 +195,9 @@ class FrontEnd(mp.Process):
             }
         )
 
+        tracking_itr_num = self.tracking_itr_num * 2 if calibration_optimizers is not None else self.tracking_itr_num
         pose_optimizer = torch.optim.Adam(opt_params)
-        for tracking_itr in range(self.tracking_itr_num):
+        for tracking_itr in range(tracking_itr_num):
             render_pkg = render(
                 viewpoint, self.gaussians, self.pipeline_params, self.background
             )
@@ -213,7 +215,7 @@ class FrontEnd(mp.Process):
             with torch.no_grad():
                 if calibration_optimizers is not None:
                     calibration_optimizers.focal_step() # add update focal
-                    # if self.allow_lens_distortion and tracking_itr > 10:
+                    # if self.allow_lens_distortion and tracking_itr > 15:
                     #     calibration_optimizers.kappa_step() # add update kappa
                     calibration_optimizers.zero_grad(set_to_none=True)
                 pose_optimizer.step()
@@ -440,35 +442,37 @@ class FrontEnd(mp.Process):
                 ###### test code block
                 if self.MODULE_TEST_CALIBRATION:
                     if cur_frame_idx == 100:
-                        viewpoint.calibration_identifier = 1 # calibration change
+                        viewpoint.calib_id = 1 # calibration change
                         focal_ref = 400
                     elif cur_frame_idx == 200:
-                        viewpoint.calibration_identifier = 1 # calibration change
+                        viewpoint.calib_id = 1 # calibration change
                         focal_ref = 350
                     elif cur_frame_idx == 300:
-                        viewpoint.calibration_identifier = 1 # calibration change
+                        viewpoint.calib_id = 1 # calibration change
                         focal_ref = 700
                     elif cur_frame_idx == 400:
-                        viewpoint.calibration_identifier = 1 # calibration change
+                        viewpoint.calib_id = 1 # calibration change
                         focal_ref = 900
                     else:
-                        viewpoint.calibration_identifier = 0 # no calibration change
+                        viewpoint.calib_id = 0 # no calibration change
                         focal_ref = None
 
 
                 # the camera notifies the frontend calibration that there exists carlibation change by
-                # passing a calibration_identifier > 0
-                # then frontend reset the right calibration identifier, by accumulating on the local calibration_identifier
-                if viewpoint.calibration_identifier > 0:  # expected value: 0, 1                    
+                # passing a calib_id > 0
+                # then frontend reset the right calibration identifier, by accumulating on the local calib_id
+                if viewpoint.calib_id > 0:  # expected value: 0, 1                    
                     if (not self.signal_calibration_change): # only do it once
-                        self.calibration_identifier += viewpoint.calibration_identifier
+                        self.calib_id += viewpoint.calib_id
                         self.calibration_frame_idx = cur_frame_idx                        
                         rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx}")
                         self.backend_queue.put(["calibration_change"])
                     self.signal_calibration_change = True
+                    self.calibration_keyframe_sent = False
+
                 else:
                     self.signal_calibration_change = False
-                viewpoint.calibration_identifier = self.calibration_identifier
+                viewpoint.calib_id = self.calib_id
 
                 if (not self.reset):
                     prev = self.cameras[cur_frame_idx - self.use_every_n_frames] # last frame in tracking
@@ -506,9 +510,6 @@ class FrontEnd(mp.Process):
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
                     save_info = "frame"+str(cur_frame_idx)
 
-                    # coarse scale
-                    # lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 10.0, learning_rate = 0.1,   max_iter_num = 30, step_safe_guard = False, save_info=save_info)
-
                     w, h = viewpoint.image_width, viewpoint.image_height
                     scale_t = 0.01 * max(w,h)
 
@@ -516,13 +517,12 @@ class FrontEnd(mp.Process):
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = scale_t,  learning_rate = 0.1,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
                     _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = scale_t,  learning_rate = lr,    max_iter_num = 20, step_safe_guard = True )
 
-                    # lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 1.0,  learning_rate = 0.01,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
-                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = 0.0,  learning_rate = lr,    max_iter_num = 20, step_safe_guard = True )
-                    # use image gradient and refine at scale 0?
-                    # lr = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.001, max_iter_num = 20, step_safe_guard = False )
+                    # at scale 0, use image gradient and refine?
+                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
 
 
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.001)
+                if (not self.calibration_keyframe_sent):
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.002)
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
@@ -553,7 +553,7 @@ class FrontEnd(mp.Process):
                     last_keyframe_idx,
                     curr_visibility,
                     self.occ_aware_visibility,
-                )                
+                )
                 if len(self.current_window) < self.window_size:
                     union = torch.logical_or(
                         curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
@@ -568,7 +568,7 @@ class FrontEnd(mp.Process):
                     )
                 if self.single_thread:
                     create_kf = check_time and create_kf
-                if create_kf: #or self.signal_calibration_change:
+                if create_kf: #or self.signal_calibration_change:                    
                     # removed = None
                     # if (not create_kf) and self.signal_calibration_change: # if not a keyframe, but calibration changes
                     #     self.current_window[0] = cur_frame_idx # replace the last keyframe with the current keyframe
@@ -595,7 +595,8 @@ class FrontEnd(mp.Process):
                     self.request_keyframe(
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )
-                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calibration_identifier}")
+                    self.calibration_keyframe_sent = True
+                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}")
                 else:
                     self.cleanup(cur_frame_idx)
                 cur_frame_idx += 1
@@ -761,8 +762,8 @@ class FrontEnd(mp.Process):
             kf_calib = copy.deepcopy( [last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa] )
             for frame_idx in range(self.calibration_frame_idx, cur_frame_idx, self.use_every_n_frames):
                 frame = self.cameras[frame_idx]
-                assert frame.calibration_identifier == last_keyframe.calibration_identifier, f"{frame.calibration_identifier=}\t{last_keyframe.calibration_identifier=}"
-                # if frame.calibration_identifier == last_keyframe.calibration_identifier:
+                assert frame.calib_id == last_keyframe.calib_id, f"{frame.calib_id=}\t{last_keyframe.calib_id=}"
+                # if frame.calib_id == last_keyframe.calib_id:
                 calib = kf_calib.copy()
                 kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
                 frame.update_calibration (kf_fx, kf_fy, kf_kappa)

@@ -81,14 +81,14 @@ class BackEndCali(BackEnd):
                     current_window = data[3]
                     depth_map = data[4]
 
-                    rich.print(f"[bold blue]BackEnd  Receive :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calibration_identifier}")
+                    rich.print(f"[bold blue]BackEnd  Receive :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}")
 
-                    current_calibration_identifier = viewpoint.calibration_identifier
-                    # calibration_identifier_cnt = 0
+                    current_calib_id = viewpoint.calib_id
+                    # calib_id_cnt = 0
 
                     if len(self.current_window):
                         last_keyframe = self.viewpoints[ self.current_window[0] ]
-                        if (current_calibration_identifier == last_keyframe.calibration_identifier):
+                        if (current_calib_id == last_keyframe.calib_id):
                             viewpoint.update_calibration(last_keyframe.fx, last_keyframe.fy, last_keyframe.kappa) # use the calibration estimate in backend keyframes
                             self.signal_calibration_change = False
                         else:
@@ -96,10 +96,10 @@ class BackEndCali(BackEnd):
 
                     if self.signal_calibration_change:
                         self.calibration_initialized = False
-                        self.calibration_identifier_cnt = 0
-                    self.calibration_identifier_cnt += 1
+                        self.calib_id_cnt = 0
+                    self.calib_id_cnt += 1
 
-                    rich.print(f"[bold blue]BackEnd  InitEst :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calibration_identifier}")
+                    rich.print(f"[bold blue]BackEnd  InitEst :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}")
 
                     self.viewpoints[cur_frame_idx] = viewpoint
                     self.current_window = current_window
@@ -158,7 +158,7 @@ class BackEndCali(BackEnd):
                                     }
                                 )
                             calib_opt_frames_stack.append(viewpoint)
-                            # calibration_identifier_cnt += 1 if viewpoint.calibration_identifier == current_calibration_identifier else 0
+                            # calib_id_cnt += 1 if viewpoint.calib_id == current_calib_id else 0
                         if not self.use_gt_poses:
                             pose_opt_params.append(
                                 {
@@ -179,11 +179,11 @@ class BackEndCali(BackEnd):
                         self.keyframe_optimizers.zero_grad()
 
                     
-                    # if self.require_calibration and self.initialized and calibration_identifier_cnt >= 1 and current_calibration_identifier != 0:
+                    # if self.require_calibration and self.initialized and calib_id_cnt >= 1 and current_calib_id != 0:
                     # and window is full
-                    if self.require_calibration and self.initialized and self.calibration_identifier_cnt >= 1 and current_calibration_identifier != 0 and (not self.calibration_initialized):
+                    if self.require_calibration and self.initialized and self.calib_id_cnt >= 1 and current_calib_id != 0 and (not self.calibration_initialized):
 
-                    # if self.require_calibration and self.initialized and calibration_identifier_cnt >= 1 and current_calibration_identifier != 0 and len(self.current_window) == self.config["Training"]["window_size"]:
+                    # if self.require_calibration and self.initialized and calib_id_cnt >= 1 and current_calib_id != 0 and len(self.current_window) == self.config["Training"]["window_size"]:
                         # self.viewpoint_refinement(self.current_window, iters=50)
                         H = viewpoint.image_height
                         W = viewpoint.image_width
@@ -200,7 +200,7 @@ class BackEndCali(BackEnd):
 
                     ### The order of following three matters a lot! ###
                     if self.calibration_optimizers is not None:
-                        if (self.calibration_identifier_cnt == 1): # Don't update 3D structure with one view
+                        if (self.calib_id_cnt == 1): # Don't update 3D structure with one view
                             rich.print("[bold green]cali_id_cnt == 1[/bold green]")
                             lr1 = self.config["Training"]["be_focal_lr_cnt_s2"] if ("be_focal_lr_cnt_s2" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr1)
@@ -214,7 +214,7 @@ class BackEndCali(BackEnd):
                             # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*3)
                             # self.map(self.current_window, calibrate=True, fix_gaussian=False,  iters=iter_per_kf*5)
                             # self.map(self.current_window, calibrate=True, fix_gaussian=True,  iters=30)
-                        elif (self.calibration_identifier_cnt == 2):
+                        elif (self.calib_id_cnt == 2):
                             rich.print("[bold green]cali_id_cnt == 2[/bold green]")
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
@@ -222,7 +222,7 @@ class BackEndCali(BackEnd):
                             # self.map(self.current_window, prune=True, iters=5)
                             # afle = eval_cali(self.viewpoints, None)
                             # rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
-                        elif (self.calibration_identifier_cnt == len(self.current_window)):
+                        elif (self.calib_id_cnt == len(self.current_window)):
                             lr2 = self.config["Training"]["be_focal_lr"] if ("be_focal_lr" in self.config["Training"].keys()) else 0.002
                             self.calibration_optimizers.update_focal_learning_rate(lr = lr2)
                             self.map(self.current_window, calibrate=True, fix_gaussian=False, iters=iter_per_kf*2) # BA with full window
@@ -252,18 +252,18 @@ class BackEndCali(BackEnd):
                     self.map(self.current_window, prune=True)
 
 
-                    if self.calibration_identifier_cnt == 10: # number of keyframes after calibration change
+                    if self.calib_id_cnt == 10: # number of keyframes after calibration change
                         self.calibration_initialized = True
 
-                    # update all cameras with the most recent calibration_identifier
+                    # update all cameras with the most recent calib_id
                     if self.calibration_optimizers is not None:
                         fx = self.viewpoints[cur_frame_idx].fx
                         fy = self.viewpoints[cur_frame_idx].fy
                         kappa = self.viewpoints[cur_frame_idx].kappa
                         for cam_id, viewpoint in self.viewpoints.items():
-                            if viewpoint.calibration_identifier == current_calibration_identifier:
+                            if viewpoint.calib_id == current_calib_id:
                                 viewpoint.update_calibration(fx, fy, kappa)
-                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calibration_identifier}, iter_per_kf: {iter_per_kf}\n")
+                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calib_id}, iter_per_kf: {iter_per_kf}\n")
                     
                     # if len(self.viewpoints) > 1:
                     #     # ate = backend_eval(self.viewpoints, None)
@@ -271,7 +271,7 @@ class BackEndCali(BackEnd):
                     #     # rich.print(f"[bold blue]BackEnd  ATE:[/bold blue] [{cur_frame_idx}]: {ate:.6f}\n")
                     #     rich.print(f"[bold blue]BackEnd  AFLE:[/bold blue] [{cur_frame_idx}]: {afle:.6f}\n")
                     
-                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calibration_identifier}, iter_per_kf: {iter_per_kf}\n")
+                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {self.viewpoints[cur_frame_idx].fx:.3f}, fy: {self.viewpoints[cur_frame_idx].fy:.3f}, kappa: {self.viewpoints[cur_frame_idx].kappa:.6f}, calib_id: {self.viewpoints[cur_frame_idx].calib_id}, iter_per_kf: {iter_per_kf}\n")
                     self.push_to_frontend("keyframe")
 
                     # add depth points at last, because these points will not be optimized with one view.

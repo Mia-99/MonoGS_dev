@@ -56,7 +56,7 @@ class CalibrationOptimizer:
     def __init_calibration_groups(self):
         self.calibration_groups = {}
         for viewpoint_cam in self.viewpoint_stack:
-            calib_id = viewpoint_cam.calibration_identifier
+            calib_id = viewpoint_cam.calib_id
             if calib_id not in self.calibration_groups:
                 self.calibration_groups[ calib_id ] = []
             self.calibration_groups[ calib_id ].append(viewpoint_cam)
@@ -140,10 +140,10 @@ class CalibrationOptimizer:
 
 
 
-    # update cameras with calibration_identifier
-    def __update_focal_estimates (self, calibration_identifier):
+    # update cameras with calib_id
+    def __update_focal_estimates (self, calib_id):
         for calib_id, cam_stack in self.calibration_groups.items():
-            if calib_id == calibration_identifier:
+            if calib_id == calib_id:
                 focal_delta_normalized = self.focal_delta_groups [ calib_id ].data.cpu().numpy()[0]
                 focal_delta = focal_delta_normalized * self.focal_normalizer  # real_focal = normalized_focal * normalizer
                 focal_grad_normalized  = self.focal_delta_groups [ calib_id ].grad.cpu().numpy()[0]
@@ -156,10 +156,10 @@ class CalibrationOptimizer:
 
 
 
-    # update cameras' with calibration_identifier
-    def __update_kappa_estimates (self, calibration_identifier):
+    # update cameras' with calib_id
+    def __update_kappa_estimates (self, calib_id):
         for calib_id, cam_stack in self.calibration_groups.items():
-            if calib_id == calibration_identifier:
+            if calib_id == calib_id:
                 kappa_delta = self.kappa_delta_groups [ calib_id ].data.cpu().numpy()[0]
                 kappa_grad  = self.kappa_delta_groups [ calib_id ].grad.cpu().numpy()[0]
                 # print(f">>opt_kappa={kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
@@ -189,7 +189,7 @@ class CalibrationOptimizer:
     def focal_step(self):
         self.__update_focal_gradients()        
         self.focal_optimizer.step()
-        (focal, focal_grad) = self.__update_focal_estimates (calibration_identifier = self.current_calib_id)
+        (focal, focal_grad) = self.__update_focal_estimates (calib_id = self.current_calib_id)
 
         if self.num_line_elements > 0:
             self.focal_grad_stack.append(focal_grad)
@@ -218,7 +218,7 @@ class CalibrationOptimizer:
     def kappa_step(self):
         self.__update_kappa_gradients()
         self.kappa_optimizer.step()
-        self.__update_kappa_estimates (calibration_identifier = self.current_calib_id)
+        self.__update_kappa_estimates (calib_id = self.current_calib_id)
 
 
 

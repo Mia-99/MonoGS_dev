@@ -57,7 +57,7 @@ class Camera(nn.Module):
         self.fy_init = self.fy
         self.kappa_init = self.kappa
 
-        self.calibration_identifier = 0
+        self.calib_id = 0
 
         self.cam_rot_delta = nn.Parameter(
             torch.zeros(3, requires_grad=True, device=device)
@@ -81,9 +81,9 @@ class Camera(nn.Module):
         )
         # add calibration identifier for calibration groups
         if calib_id is not None:
-            self.calibration_identifier = calib_id
+            self.calib_id = calib_id
         else:
-            self.calibration_identifier = 0
+            self.calib_id = 0
         # self.projection_matrix = self.projection_matrix.to(device=device)
 
     @staticmethod

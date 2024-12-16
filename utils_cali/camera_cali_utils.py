@@ -40,9 +40,9 @@ class CameraForCalibration(Camera):
             device,
         )
         if cali_id is None:
-            self.calibration_identifier = 0
+            self.calib_id = 0
         else:
-            self.calibration_identifier = cali_id
+            self.calib_id = cali_id
 
 
     @staticmethod

@@ -140,15 +140,15 @@ class FrontEndCali(FrontEnd):
 
                 # if self.MODULE_TEST_CALIBRATION and self.simulator is not None:
                 if self.simulator is not None:
-                    viewpoint.calibration_identifier = self.simulator.cali_id[cur_frame_idx]
-                    focal_ref = None if viewpoint.calibration_identifier == 0 else self.simulator.fx[cur_frame_idx]
+                    viewpoint.calib_id = self.simulator.cali_id[cur_frame_idx]
+                    focal_ref = None if viewpoint.calib_id == 0 else self.simulator.fx[cur_frame_idx]
                     viewpoint.fx_init = self.simulator.fx[cur_frame_idx]
                     viewpoint.fy_init = self.simulator.fy[cur_frame_idx]
                     viewpoint.kappa_init = 0.0 # backup
                     # viewpoint.fx = self.simulator.fx[cur_frame_idx]
                     # viewpoint.fy = self.simulator.fy[cur_frame_idx]
                 if self.add_perterbation:
-                    viewpoint.calibration_identifier = 1
+                    viewpoint.calib_id = 1
                     focal_per = self.config["Dataset"]["focal_perturbation"] if 'focal_perturbation' in self.config["Dataset"] else 1.01
                     viewpoint.fx = viewpoint.fx * focal_per
                     viewpoint.fy = viewpoint.fy * focal_per
@@ -164,7 +164,7 @@ class FrontEndCali(FrontEnd):
                     else:
                         viewpoint.update_RT(prev.R, prev.T)
 
-                    if viewpoint.calibration_identifier != prev.calibration_identifier:
+                    if viewpoint.calib_id != prev.calib_id:
                         if (not self.signal_calibration_change):
                             rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx}")
                             self.backend_queue.put(["calibration_change"])
@@ -288,7 +288,7 @@ class FrontEndCali(FrontEnd):
                     self.request_keyframe(
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )
-                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calibration_identifier}")
+                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}")
 
                 else:
                     self.cleanup(cur_frame_idx)

@@ -218,13 +218,13 @@ def eval_cali(frames, kf_indices=None):
     AFLE=0
     if kf_indices is None:
         for id, kf in frames.items():
-            if kf.calibration_identifier != 0:
+            if kf.calib_id != 0:
                 n += 1
                 AFLE += abs(kf.fx_init - kf.fx)
     else:
         for kf_id in kf_indices:
             kf = frames[kf_id]
-            if kf.calibration_identifier != 0:
+            if kf.calib_id != 0:
                 n += 1
                 AFLE += abs(kf.fx_init - kf.fx) 
     return AFLE/n if n != 0 else 0
@@ -248,7 +248,7 @@ def save_cali(save_dir, frames, kf_indices, ATE_records=None):
 
         kappa_est.append(frames[kf_id].kappa)
         kappa_gt.append(frames[kf_id].kappa_init)
-        if kf.calibration_identifier != 0:
+        if kf.calib_id != 0:
             n += 1
             AFLE += abs(frames[kf_id].fx_init - frames[kf_id].fx) 
 

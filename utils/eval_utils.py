@@ -207,7 +207,7 @@ def save_cameras(save_dir, iteration, viewpoint_dict):
         fx = viewpoint.fx
         fy = viewpoint.fy
         kappa = viewpoint.kappa
-        calib_id = viewpoint.calibration_identifier
+        calib_id = viewpoint.calib_id
 
         uid_stack.append ( uid )
         R_stack.append( R.tolist() )
