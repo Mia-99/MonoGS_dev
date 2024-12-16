@@ -245,7 +245,7 @@ class BackEnd(mp.Process):
 
             scaling = self.gaussians.get_scaling
             isotropic_loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1))
-            loss_mapping += 10 * isotropic_loss.mean()  if (not calibrate) else 0 # 0.01*self.gaussians.get_opacity.mean() # loss to enhance sparsity
+            loss_mapping += 10 * isotropic_loss.mean()  #if (not calibrate) else 0 # 0.01*self.gaussians.get_opacity.mean() # loss to enhance sparsity
             loss_mapping.backward()
             gaussian_split = False
             ## Deinsifying / Pruning Gaussians
@@ -366,7 +366,7 @@ class BackEnd(mp.Process):
                             continue
                         # only update frames with new calibration id
                         if current_window[cam_idx] < self.calibration_keyframe_idx:
-                            print(f"calibrate: YES. skip keyframe {current_window[cam_idx]} for < {self.calibration_keyframe_idx}")
+                            # print(f"calibrate: YES. skip keyframe {current_window[cam_idx]} for < {self.calibration_keyframe_idx}")
                             continue
                         update_pose(viewpoint)
                 else:
