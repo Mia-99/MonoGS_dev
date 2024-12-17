@@ -12,7 +12,7 @@ from utils.eval_utils import eval_ate, save_gaussians
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
-from utils.slam_utils import get_loss_tracking, get_median_depth
+from utils.slam_utils import get_loss_tracking, get_median_depth, get_loss_tracking_no_grad_mask
 
 from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 
@@ -147,7 +147,7 @@ class FrontEnd(mp.Process):
         self.request_init(cur_frame_idx, viewpoint, depth_map)
         self.reset = False
 
-    def tracking(self, cur_frame_idx, viewpoint, focal_optimizer_type=None, learning_rate=0.001):
+    def tracking(self, cur_frame_idx, viewpoint, focal_optimizer_type=None, learning_rate=0.001, grad_mask=True):
 
         # add calibration optimizer in tracking
         calibration_optimizers = None
@@ -195,7 +195,8 @@ class FrontEnd(mp.Process):
             }
         )
 
-        tracking_itr_num = self.tracking_itr_num * 2 if calibration_optimizers is not None else self.tracking_itr_num
+        tracking_itr_num = self.tracking_itr_num * 2 if focal_optimizer_type is not None else self.tracking_itr_num
+
         pose_optimizer = torch.optim.Adam(opt_params)
         for tracking_itr in range(tracking_itr_num):
             render_pkg = render(
@@ -208,6 +209,8 @@ class FrontEnd(mp.Process):
             )
             pose_optimizer.zero_grad()
             loss_tracking = get_loss_tracking(
+                self.config, image, depth, opacity, viewpoint
+            ) if grad_mask else get_loss_tracking_no_grad_mask (
                 self.config, image, depth, opacity, viewpoint
             )
             loss_tracking.backward()
@@ -520,9 +523,11 @@ class FrontEnd(mp.Process):
                     # at scale 0, use image gradient and refine?
                     _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
 
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=False)
 
                 if (not self.calibration_keyframe_sent):
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD", learning_rate=0.002)
+                    
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
@@ -709,8 +714,8 @@ class FrontEnd(mp.Process):
      
             # Gaussian scale space
             image_scale_t = image_conv_gaussian_separable(image_ab, sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else image_ab
-
-            loss = ( opacity * torch.abs(image_scale_t*rgb_pixel_mask - gt_image_scale_t*rgb_pixel_mask) ).mean()
+            l1 = opacity * rgb_pixel_mask * torch.abs(image_scale_t - gt_image_scale_t)
+            loss = l1.mean()
 
             if save_info is not None:
                 postfix = "_scale"+str(gaussian_scale_t) + "_itr"+str(itr)+"_focal"+str(viewpoint.fx)+".png"

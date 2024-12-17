@@ -140,3 +140,42 @@ def get_median_depth(depth, opacity=None, mask=None, return_std=False):
     if return_std:
         return valid_depth.median(), valid_depth.std(), valid
     return valid_depth.median()
+
+
+
+
+"""
+Disable gradient mask
+"""
+def get_loss_tracking_no_grad_mask (config, image, depth, opacity, viewpoint, initialization=False):
+    image_ab = (torch.exp(viewpoint.exposure_a)) * image + viewpoint.exposure_b
+    if config["Training"]["monocular"]:
+        return get_loss_tracking_rgb_no_grad_mask(config, image_ab, depth, opacity, viewpoint)
+    return get_loss_tracking_rgbd_no_grad_mask(config, image_ab, depth, opacity, viewpoint)
+
+
+def get_loss_tracking_rgb_no_grad_mask (config, image, depth, opacity, viewpoint):
+    gt_image = viewpoint.original_image.cuda()
+    _, h, w = gt_image.shape
+    mask_shape = (1, h, w)
+    rgb_boundary_threshold = config["Training"]["rgb_boundary_threshold"]
+    rgb_pixel_mask = (gt_image.sum(dim=0) > rgb_boundary_threshold).view(*mask_shape)
+    
+    l1 = opacity * torch.abs(image * rgb_pixel_mask - gt_image * rgb_pixel_mask)
+    return l1.mean()
+
+def get_loss_tracking_rgbd_no_grad_mask(
+    config, image, depth, opacity, viewpoint, initialization=False
+):
+    alpha = config["Training"]["alpha"] if "alpha" in config["Training"] else 0.95
+
+    gt_depth = torch.from_numpy(viewpoint.depth).to(
+        dtype=torch.float32, device=image.device
+    )[None]
+    depth_pixel_mask = (gt_depth > 0.01).view(*depth.shape)
+    opacity_mask = (opacity > 0.95).view(*depth.shape)
+
+    l1_rgb = get_loss_tracking_rgb_no_grad_mask(config, image, depth, opacity, viewpoint)
+    depth_mask = depth_pixel_mask * opacity_mask
+    l1_depth = torch.abs(depth * depth_mask - gt_depth * depth_mask)
+    return alpha * l1_rgb + (1 - alpha) * l1_depth.mean()
