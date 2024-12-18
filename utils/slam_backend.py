@@ -158,7 +158,7 @@ class BackEnd(mp.Process):
         Log("Initialized map")
         return render_pkg
 
-    def map(self, current_window, prune=False, calibrate=0, fix_gaussian = False, iters=1, prune_floaters = False):
+    def map(self, current_window, prune=False, calibrate=0, fix_gaussian = False, iters=1):
         if len(current_window) == 0:
             return
 
@@ -291,59 +291,40 @@ class BackEnd(mp.Process):
                         # # make sure we don't split the gaussians, break here.
                     return False
 
-                # # remove floaters
-                # if  prune_floaters:
+                """
+                3DGS Dynamic control strategy
+                """
+                if (not fix_gaussian):
 
-                #     sorted_window = sorted(current_window, reverse=True)
-                #     mask_recent_kfs = self.gaussians.unique_kfIDs >= sorted_window[2]                    
-                #     mask = self.gaussians.unique_kfIDs >= self.calibration_keyframe_idx
-
-                #     low_opacity = (self.gaussians.get_opacity < self.gaussian_th).squeeze()
-                #     to_prune = torch.logical_and( low_opacity.cuda(), mask.cuda())
-                    
-                #     # print(f"self.gaussians.unique_kfIDs = {type(self.gaussians.unique_kfIDs )},  {self.gaussians.unique_kfIDs.shape},  {self.gaussians.unique_kfIDs.device} ")
-                #     # print(f"self.gaussians.n_obs = {type(self.gaussians.n_obs )},  {self.gaussians.n_obs.shape},  {self.gaussians.n_obs.device} ")
-                #     # print(f"self.gaussians.get_opacity = {type(self.gaussians.get_opacity )},  {self.gaussians.get_opacity.shape},  {self.gaussians.get_opacity.device} ")
-                #     # print(f"self.gaussians.unique_kfIDs >= self.calibration_keyframe_idx = {type(mask)},   {mask.shape},   {mask.device}")
-                #     print(f"no. of Gaussians:")
-                #     print(f"\tlow_opacity {torch.sum(   low_opacity   )}")
-                #     print(f"\tmask_kfIDs  {torch.sum(   mask   )}")
-                #     print(f"\tto_prune    {torch.sum(   to_prune   )}")
-
-                #     self.gaussians.prune_points(to_prune.cuda())
-
-                #     return False
-
-
-                for idx in range(len(viewspace_point_tensor_acm)):
-                    self.gaussians.max_radii2D[visibility_filter_acm[idx]] = torch.max(
-                        self.gaussians.max_radii2D[visibility_filter_acm[idx]],
-                        radii_acm[idx][visibility_filter_acm[idx]],
+                    for idx in range(len(viewspace_point_tensor_acm)):
+                        self.gaussians.max_radii2D[visibility_filter_acm[idx]] = torch.max(
+                            self.gaussians.max_radii2D[visibility_filter_acm[idx]],
+                            radii_acm[idx][visibility_filter_acm[idx]],
+                        )
+                        self.gaussians.add_densification_stats(
+                            viewspace_point_tensor_acm[idx], visibility_filter_acm[idx]
+                        )
+                    update_gaussian = (
+                        self.iteration_count % self.gaussian_update_every
+                        == self.gaussian_update_offset
                     )
-                    self.gaussians.add_densification_stats(
-                        viewspace_point_tensor_acm[idx], visibility_filter_acm[idx]
-                    )
-                update_gaussian = (
-                    self.iteration_count % self.gaussian_update_every
-                    == self.gaussian_update_offset
-                )
-                if ( update_gaussian and (not fix_gaussian) ):
-                    self.gaussians.densify_and_prune(
-                        self.opt_params.densify_grad_threshold,
-                        self.gaussian_th,
-                        self.gaussian_extent,
-                        self.size_threshold,
-                    )
-                    Log("gaussians.densify_and_prune")
-                    gaussian_split = True
+                    if ( update_gaussian ):
+                        self.gaussians.densify_and_prune(
+                            self.opt_params.densify_grad_threshold,
+                            self.gaussian_th,
+                            self.gaussian_extent,
+                            self.size_threshold,
+                        )
+                        Log("gaussians.densify_and_prune")
+                        gaussian_split = True
 
-                ## Opacity reset
-                if (self.iteration_count % self.gaussian_reset) == 0 and (not fix_gaussian) and (
-                    not update_gaussian
-                ):
-                    Log("Resetting the opacity of non-visible Gaussians")
-                    self.gaussians.reset_opacity_nonvisible(visibility_filter_acm)
-                    gaussian_split = True
+                    ## Opacity reset
+                    if (self.iteration_count % self.gaussian_reset) == 0 and (not fix_gaussian) and (
+                        not update_gaussian
+                    ):
+                        Log("Resetting the opacity of non-visible Gaussians")
+                        self.gaussians.reset_opacity_nonvisible(visibility_filter_acm)
+                        gaussian_split = True
 
 
                 # Calibration update. only do calibration if slam has been initialized.
@@ -360,7 +341,7 @@ class BackEnd(mp.Process):
                 self.keyframe_optimizers.zero_grad(set_to_none=True)
 
 
-                if (not self.calibration_initialized) and (calibrate): # calibration
+                if (not self.calibration_initialized) and (calibrate==1 or calibrate==2 or calibrate==3): # calibration
                     for cam_idx in range( len(current_window) ):
                         viewpoint = viewpoint_stack[cam_idx]
                         if viewpoint.uid == 0:
@@ -381,9 +362,9 @@ class BackEnd(mp.Process):
                 # Structure (3D Gaussian) update
                 if not fix_gaussian:
                     self.gaussians.optimizer.step()
+                    self.gaussians.update_learning_rate(self.iteration_count)
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
-                self.gaussians.update_learning_rate(self.iteration_count)
-
+                
 
         return gaussian_split
 
@@ -526,6 +507,20 @@ class BackEnd(mp.Process):
         Log("Multiview calibration refinement done")
 
 
+
+    def prune_floaters(self, min_opacity, extent, max_screen_size): 
+        mask = self.gaussians.unique_kfIDs >= self.calibration_keyframe_idx
+        prune_mask = (self.gaussians.get_opacity < min_opacity).squeeze()
+        if max_screen_size:
+            big_points_vs = self.gaussians.max_radii2D > max_screen_size
+            big_points_ws = self.gaussians.get_scaling.max(dim=1).values > 0.1 * extent
+            prune_mask = torch.logical_or(
+                torch.logical_or(prune_mask, big_points_vs), big_points_ws
+            )
+        prune_mask = torch.logical_and( prune_mask, mask.cuda())
+        self.gaussians.prune_points(prune_mask)
+
+
     def run(self):
         while True:
             if self.backend_queue.empty():
@@ -572,7 +567,7 @@ class BackEnd(mp.Process):
                     self.push_to_frontend("init")
 
                 elif data[0] == "calibration_change":
-                    rich.print("[bold red]Backend : calibration change signal recieved [/bold red]")
+                    rich.print("[bold red]Backend : calibration change signal recieved [/bold red]")                    
                     self.map(self.current_window, iters=10)
                     self.map(self.current_window, prune=True, iters=1)
                     self.push_to_frontend()
@@ -671,6 +666,7 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
                     self.keyframe_optimizers.zero_grad()
                     self.calibration_optimizers = None
+                    self.gaussians.optimizer.zero_grad(set_to_none=True)
 
                     """
                     Uncalibrated Dense Bundle Adjustment (pose, Gaussians, calibration)
@@ -693,16 +689,13 @@ class BackEnd(mp.Process):
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
 
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=2*iter_per_kf)
+                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)
+
                             self.multiview_calibration_refinement(iters = 30, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
 
-                            self.gaussians.densify_and_prune(
-                                self.opt_params.densify_grad_threshold,
-                                self.gaussian_th,
-                                self.gaussian_extent,
-                                self.size_threshold,
-                            )
-                            Log("gaussians.densify_and_prune")
+
+                            self.prune_floaters(min_opacity=self.gaussian_th, max_screen_size=self.gaussian_extent, extent=self.size_threshold)
+
 
                             self.calibration_initialized = True
                             Log("Calibration Initialized")
@@ -717,8 +710,11 @@ class BackEnd(mp.Process):
                         elif (self.calib_id_cnt == 2):
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.001)
+                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)                            
+
+                        else:
+                            pass
                         
 
                         # update all cameras with the most recent calib_id
@@ -745,7 +741,9 @@ class BackEnd(mp.Process):
                     # self.keyframe_optimizers.zero_grad()
                     # self.calibration_optimizers = None
 
-                    self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)                    
+                    # if self.calibration_initialized:
+                    self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map) 
+
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
                     self.push_to_frontend("keyframe")

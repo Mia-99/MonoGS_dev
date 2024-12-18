@@ -195,7 +195,7 @@ class FrontEnd(mp.Process):
             }
         )
 
-        tracking_itr_num = self.tracking_itr_num * 2 if focal_optimizer_type is not None else self.tracking_itr_num
+        tracking_itr_num = self.tracking_itr_num * 3 if focal_optimizer_type is not None else self.tracking_itr_num
 
         pose_optimizer = torch.optim.Adam(opt_params)
         for tracking_itr in range(tracking_itr_num):
@@ -459,6 +459,8 @@ class FrontEnd(mp.Process):
                     else:
                         viewpoint.calib_id = 0 # no calibration change
                         focal_ref = None
+                    
+                    self.save_trj_kf_intv = 1 if self.initialized else self.save_trj_kf_intv
 
 
                 # the camera notifies the frontend calibration that there exists carlibation change by
@@ -516,21 +518,29 @@ class FrontEnd(mp.Process):
                     w, h = viewpoint.image_width, viewpoint.image_height
                     scale_t = 0.01 * max(w,h)
 
+                    """
+                    at coarse scale, scale_t decided by image size
+                    """
                     # Adam+SGD, at the same scale
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = scale_t,  learning_rate = 0.1,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
                     _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = scale_t,  learning_rate = lr,    max_iter_num = 20, step_safe_guard = True )
 
-                    # at scale 0, use image gradient and refine?
-                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
-
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=False)
-
-                if (not self.calibration_keyframe_sent):
+                    """
+                    at scale 0
+                    """
+                    # focal should be close to ground-truth now, but not accurate if the pose changes a lot
+                    # _  = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 0.0,      learning_rate = 0.001,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
+                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
                     
+                if (not self.calibration_keyframe_sent):
+                    render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                    # render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=False)
                     render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
+
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
 
+                plt.close()
 
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
