@@ -534,6 +534,7 @@ class FrontEnd(mp.Process):
                     
                 if (not self.calibration_keyframe_sent):
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                    # _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
                     # render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=False)
                     render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
 

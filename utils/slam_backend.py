@@ -10,7 +10,7 @@ from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
-from utils.slam_utils import get_loss_mapping, get_loss_tracking
+from utils.slam_utils import get_loss_mapping, get_loss_tracking, get_median_depth
 
 from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 import numpy as np
@@ -331,7 +331,7 @@ class BackEnd(mp.Process):
                 if calibrate and self.require_calibration and self.initialized:
                     if (self.calibration_optimizers is not None) and (not prune) and (not gaussian_split):
                         self.calibration_optimizers.focal_step()
-                        if self.allow_lens_distortion and cur_itr > 2:
+                        if self.allow_lens_distortion and cur_itr > 5:
                             self.calibration_optimizers.kappa_step()
                 if self.calibration_optimizers is not None:
                     self.calibration_optimizers.zero_grad(set_to_none=True)
@@ -521,6 +521,47 @@ class BackEnd(mp.Process):
         self.gaussians.prune_points(prune_mask)
 
 
+
+    def create_rendered_depthmap (self, viewpoint):
+        render_pkg = render(
+            viewpoint, self.gaussians, self.pipeline_params, self.background
+        )
+        (
+            image,
+            depth,
+            opacity
+        ) = (
+            render_pkg["render"],
+            render_pkg["depth"],
+            render_pkg["opacity"]
+        )
+
+        rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
+        gt_img = viewpoint.original_image.cuda()
+        valid_rgb = (gt_img.sum(dim=0) > rgb_boundary_threshold)[None]
+
+        depth = depth.detach().clone()
+        opacity = opacity.detach()
+        median_depth, std, valid_mask = get_median_depth(
+            depth, opacity, mask=valid_rgb, return_std=True
+        )
+        invalid_depth_mask = torch.logical_or(
+            depth > median_depth + std, depth < median_depth - std
+        )
+        invalid_depth_mask = torch.logical_or(
+            invalid_depth_mask, ~valid_mask
+        )
+        depth[invalid_depth_mask] = median_depth
+        initial_depth = depth + torch.randn_like(depth) * torch.where(
+            invalid_depth_mask, std * 0.5, std * 0.2
+        )
+
+        initial_depth[~valid_rgb] = 0  # Ignore the invalid rgb pixels
+        return initial_depth.cpu().numpy()[0]
+
+
+
+
     def run(self):
         while True:
             if self.backend_queue.empty():
@@ -568,6 +609,13 @@ class BackEnd(mp.Process):
 
                 elif data[0] == "calibration_change":
                     rich.print("[bold red]Backend : calibration change signal recieved [/bold red]")                    
+                    self.gaussians.densify_and_prune(
+                        self.opt_params.densify_grad_threshold,
+                        self.gaussian_th,
+                        self.gaussian_extent,
+                        self.size_threshold,
+                    )
+
                     self.map(self.current_window, iters=10)
                     self.map(self.current_window, prune=True, iters=1)
                     self.push_to_frontend()
@@ -666,7 +714,7 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
                     self.keyframe_optimizers.zero_grad()
                     self.calibration_optimizers = None
-                    self.gaussians.optimizer.zero_grad(set_to_none=True)
+                    # self.gaussians.optimizer.zero_grad(set_to_none=True)
 
                     """
                     Uncalibrated Dense Bundle Adjustment (pose, Gaussians, calibration)
@@ -693,13 +741,15 @@ class BackEnd(mp.Process):
 
                             self.multiview_calibration_refinement(iters = 30, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
 
-
-                            self.prune_floaters(min_opacity=self.gaussian_th, max_screen_size=self.gaussian_extent, extent=self.size_threshold)
-
-
                             self.calibration_initialized = True
                             Log("Calibration Initialized")
 
+                            self.gaussians.densify_and_prune(
+                                self.opt_params.densify_grad_threshold,
+                                self.gaussian_th,
+                                self.gaussian_extent,
+                                self.size_threshold,
+                            )
 
                         elif (self.calib_id_cnt == 1):
 
@@ -711,7 +761,7 @@ class BackEnd(mp.Process):
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.001)
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)                            
+                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)
 
                         else:
                             pass
@@ -732,16 +782,15 @@ class BackEnd(mp.Process):
                     add new Gaussians and perform
                     Dense Bundle Adjustment (pose, Gaussians)
                     """
+
+                    self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
+                    self.keyframe_optimizers.zero_grad()
+                    self.calibration_optimizers = None
+
                     viewpoint = self.viewpoints[cur_frame_idx]
-                    if self.monocular:
-                        pass
+                    if self.monocular and (not self.calibration_initialized):
+                        depth_map = self.create_rendered_depthmap(viewpoint)
 
-
-                    # self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
-                    # self.keyframe_optimizers.zero_grad()
-                    # self.calibration_optimizers = None
-
-                    # if self.calibration_initialized:
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map) 
 
                     self.map(self.current_window, iters=iter_per_kf)
