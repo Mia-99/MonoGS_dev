@@ -60,6 +60,7 @@ class FrontEnd(mp.Process):
         self.calib_id = 0 # current calibration id
         self.calibration_frame_idx = 0   # when current calibration takes effect
         self.calibration_keyframe_sent = True
+        self.calibration_initialized = True
 
         # ATE array
         self.ATE_records = []
@@ -195,7 +196,7 @@ class FrontEnd(mp.Process):
             }
         )
 
-        tracking_itr_num = self.tracking_itr_num * 3 if focal_optimizer_type is not None else self.tracking_itr_num
+        tracking_itr_num = self.tracking_itr_num * 2 if focal_optimizer_type is not None else self.tracking_itr_num
 
         pose_optimizer = torch.optim.Adam(opt_params)
         for tracking_itr in range(tracking_itr_num):
@@ -513,6 +514,9 @@ class FrontEnd(mp.Process):
 
                 # TUNING PARAMETERS
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
+
+                    self.calibration_initialized = False
+
                     save_info = "frame"+str(cur_frame_idx)
 
                     w, h = viewpoint.image_width, viewpoint.image_height
@@ -657,6 +661,16 @@ class FrontEnd(mp.Process):
                 elif data[0] == "stop":
                     Log("Frontend Stopped.")
                     break
+
+                elif data[0] == "update_calibration":
+                    calib_id = data[1]
+                    kf_calib = data[2]
+                    self.calibration_initialized = data[3]
+                    if self.calib_id == calib_id:
+                        calib = copy.deepcopy(kf_calib)
+                        kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
+                        self.cameras[cur_frame_idx-self.use_every_n_frames].update_calibration(kf_fx, kf_fy, kf_kappa)
+                        rich.print(f"[bold blue]FrontEnd Recieve :[/bold blue] [{cur_frame_idx}]: update_calibration: fx: {kf_fx:.3f}, fy: {kf_fy:.3f}, kappa: {kf_kappa:.6f}, calib_id: {calib_id}, initialized: {self.calibration_initialized}")
 
 
 

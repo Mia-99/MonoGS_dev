@@ -51,6 +51,7 @@ class BackEnd(mp.Process):
         self.calib_id_cnt = 0
         self.calibration_initialized = True
         self.calibration_keyframe_idx = 0
+        self.calibration_window = []
 
 
     def set_hyperparams(self):
@@ -341,7 +342,7 @@ class BackEnd(mp.Process):
                 self.keyframe_optimizers.zero_grad(set_to_none=True)
 
 
-                if (not self.calibration_initialized) and calibrate: # calibration
+                if (not self.calibration_initialized) and calibrate==-1: # calibration with one view
                     for cam_idx in range( len(current_window) ):
                         viewpoint = viewpoint_stack[cam_idx]
                         if viewpoint.uid == 0:
@@ -428,30 +429,29 @@ class BackEnd(mp.Process):
     def multiview_calibration_refinement(self, iters = 30, focal_optimizer_type="SGD", lr=0.0001):
         viewpoint_stack = []
         pose_opt_params = []
-        window_calib = []
-        for cam_id, viewpoint in self.viewpoints.items():
-            if cam_id >= self.calibration_keyframe_idx:
-                viewpoint_stack.append(viewpoint)
-                pose_opt_params.append(
-                    {
-                        "params": [viewpoint.cam_rot_delta],
-                        "lr": self.config["Training"]["lr"]["cam_rot_delta"]
-                        * 0.25,
-                        "name": "rot_{}".format(viewpoint.uid),
-                    }
-                )
-                pose_opt_params.append(
-                    {
-                        "params": [viewpoint.cam_trans_delta],
-                        "lr": self.config["Training"]["lr"][
-                            "cam_trans_delta"
-                        ]
-                        * 0.25,
-                        "name": "trans_{}".format(viewpoint.uid),
-                    }
-                )
-                window_calib.append(cam_id)
-        rich.print(f"multiview_calibration_refinement: {window_calib}")
+        for cam_id in self.calibration_window:
+            viewpoint = self.viewpoints[cam_id]
+            assert cam_id >= self.calibration_keyframe_idx
+            viewpoint_stack.append(viewpoint)
+            pose_opt_params.append(
+                {
+                    "params": [viewpoint.cam_rot_delta],
+                    "lr": self.config["Training"]["lr"]["cam_rot_delta"]
+                    * 0.25,
+                    "name": "rot_{}".format(viewpoint.uid),
+                }
+            )
+            pose_opt_params.append(
+                {
+                    "params": [viewpoint.cam_trans_delta],
+                    "lr": self.config["Training"]["lr"][
+                        "cam_trans_delta"
+                    ]
+                    * 0.25,
+                    "name": "trans_{}".format(viewpoint.uid),
+                }
+            )
+        rich.print(f"multiview_calibration_refinement: {self.calibration_window}")
         # pose optimizer
         pose_optimizers = torch.optim.Adam(pose_opt_params)
         pose_optimizers.zero_grad()
@@ -616,7 +616,7 @@ class BackEnd(mp.Process):
                         self.size_threshold,
                     )
 
-                    self.map(self.current_window, iters=10)
+                    self.map(self.current_window, iters=15 )
                     self.map(self.current_window, prune=True, iters=1)
                     self.push_to_frontend()
 
@@ -657,7 +657,8 @@ class BackEnd(mp.Process):
                     calib_opt_frames_stack = []
                     frames_to_optimize = self.config["Training"]["pose_window"]
                     iter_per_kf_multithread = self.config["Training"]["after_mapping_itr_num"] if "after_mapping_itr_num" in self.config["Training"].keys() else 10
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else iter_per_kf_multithread
+                    # iter_per_kf = self.mapping_itr_num if self.single_thread else iter_per_kf_multithread
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else 10
                     if not self.initialized:
                         if (
                             len(self.current_window)
@@ -715,41 +716,60 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers.zero_grad()
                     self.calibration_optimizers = None
 
+
+
+                    """
+                    Add new points from depth map
+                    """
+                    cur_keyframe = self.viewpoints[cur_frame_idx]
+
+                    if (not self.monocular) or self.calibration_initialized:
+                        self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map) 
+
                     """
                     Uncalibrated Dense Bundle Adjustment (pose, Gaussians, calibration)
+
+                    In the monocular case, we can rerender depth map, however we need to think about when to add new points
                     """
                     if self.require_calibration and self.initialized and (not self.calibration_initialized):
 
+                        self.calibration_window.append(cur_frame_idx)
+
                         self.gaussians.optimizer.zero_grad()
 
-                        n_view_calib = 5
+                        n_view_calib = 3
                         frames_to_optimize = self.config["Training"]["pose_window"]
                         n_view_calib = min(n_view_calib, frames_to_optimize)
 
-                        H = viewpoint.image_height
-                        W = viewpoint.image_width
+                        H = cur_keyframe.image_height
+                        W = cur_keyframe.image_width
                         focal_ref = np.sqrt(H*H + W*W)/2
                         window_id_cnt = sum(i >= self.calibration_keyframe_idx for i in self.current_window)                       
                         rich.print(f"[bold green]calibration optimizer[/bold green]:\n\tcurrent_window: {self.current_window}\n\tcalibration_keyframe_idx: {self.calibration_keyframe_idx}\n\tno. calibration views in window: {window_id_cnt}/{self.calib_id_cnt}")
                         
                         # number of keyframes after calibration change
                         if (self.calib_id_cnt == n_view_calib):
+                            
+                            if self.monocular:
+                                depth_map = self.create_rendered_depthmap(cur_keyframe)
+                                self.add_next_kf(idx, cur_keyframe, depth_map=depth_map)
 
-                            self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="SGD") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002/n_view_calib)
+                            self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
                             self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf)
 
-                            self.multiview_calibration_refinement(iters = 30, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
-
+                            # self.multiview_calibration_refinement(iters = 10, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
                             # self.gaussians.densify_and_prune(
                             #     self.opt_params.densify_grad_threshold,
                             #     self.gaussian_th,
                             #     self.gaussian_extent,
                             #     self.size_threshold,
                             # )
-
+                            # self.map(self.current_window, iters=iter_per_kf)
+                            
                             self.calibration_initialized = True
                             Log("Calibration Initialized")
+
 
                         elif (self.calib_id_cnt == 1):
 
@@ -763,42 +783,46 @@ class BackEnd(mp.Process):
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
                             self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf)
 
-                        else:
-                            pass
-                        
+                            if self.monocular:
+                                for idx in self.calibration_window:
+                                    viewpoint = self.viewpoints[idx]
+                                    depth_map = self.create_rendered_depthmap(viewpoint)
+                                    self.add_next_kf(idx, viewpoint, depth_map=depth_map)
+
+                        # """
+                        # push new calibration to frontend immediately
+                        # """
+                        # cur_keyframe = self.viewpoints[cur_frame_idx]
+                        kf_calib = copy.deepcopy( [cur_keyframe.fx, cur_keyframe.fy, cur_keyframe.kappa] )
+                        # msg = ["update_calibration", cur_keyframe.calib_id, kf_calib, self.calibration_initialized]
+                        # self.frontend_queue.put(msg)
 
                         # update all cameras with the most recent calib_id
                         if self.calibration_optimizers is not None:
-                            cur_keyframe = self.viewpoints[cur_frame_idx]
-                            kf_calib = copy.deepcopy( [cur_keyframe.fx, cur_keyframe.fy, cur_keyframe.kappa] )
-                            for cam_id, viewpoint in self.viewpoints.items():
-                                if cam_id < self.calibration_keyframe_idx:
-                                    continue
-                                if viewpoint.calib_id == current_calib_id:
-                                    viewpoint.update_calibration(kf_calib[0], kf_calib[1], kf_calib[2])                    
+                            for cam_id in self.calibration_window:
+                                viewpoint = self.viewpoints[cam_id]
+                                assert cam_id >= self.calibration_keyframe_idx
+                                assert viewpoint.calib_id == current_calib_id, f"slam_backend. calib_id mismatch: {viewpoint.calib_id=}\t{current_calib_id=}"
+                                viewpoint.update_calibration(kf_calib[0], kf_calib[1], kf_calib[2])                    
+                        
+                        if self.calibration_initialized:
+                            self.calibration_window.clear()
 
 
-                    """
-                    add new Gaussians and perform
-                    Dense Bundle Adjustment (pose, Gaussians)
-                    """
+                    else:
+                        
+                        """
+                        Dense Bundle Adjustment (pose, Gaussians)
+                        """
+                        self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
+                        self.keyframe_optimizers.zero_grad()
+                        self.calibration_optimizers = None
 
-                    self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
-                    self.keyframe_optimizers.zero_grad()
-                    self.calibration_optimizers = None
+                        self.map(self.current_window, iters=iter_per_kf)
 
-                    viewpoint = self.viewpoints[cur_frame_idx]
-                    if self.monocular and (not self.calibration_initialized):
-                        depth_map = self.create_rendered_depthmap(viewpoint)
-
-                    if not (self.calib_id_cnt == 1):
-                        self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map) 
-
-                    self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
-                    self.push_to_frontend("keyframe")
-
-                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}, iter_per_kf: {iter_per_kf}\n")
+                    self.push_to_frontend("keyframe")                    
+                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {cur_keyframe.fx:.3f}, fy: {cur_keyframe.fy:.3f}, kappa: {cur_keyframe.kappa:.6f}, calib_id: {cur_keyframe.calib_id}, iter_per_kf: {iter_per_kf}\n")
 
                 else:
                     raise Exception("Unprocessed data", data)
