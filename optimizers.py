@@ -40,6 +40,7 @@ class CalibrationOptimizer:
         self.__init_calibration_groups()
         self.__init_current_calibration_id()
         self.__init_optimizers()
+        self.zero_grad()
 
         self.focal_grad_stack = []
         self.focal_stack = []
