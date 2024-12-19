@@ -341,7 +341,7 @@ class BackEnd(mp.Process):
                 self.keyframe_optimizers.zero_grad(set_to_none=True)
 
 
-                if (not self.calibration_initialized) and (calibrate==1 or calibrate==2 or calibrate==3): # calibration
+                if (not self.calibration_initialized) and calibrate: # calibration
                     for cam_idx in range( len(current_window) ):
                         viewpoint = viewpoint_stack[cam_idx]
                         if viewpoint.uid == 0:
@@ -714,12 +714,13 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
                     self.keyframe_optimizers.zero_grad()
                     self.calibration_optimizers = None
-                    # self.gaussians.optimizer.zero_grad(set_to_none=True)
 
                     """
                     Uncalibrated Dense Bundle Adjustment (pose, Gaussians, calibration)
                     """
                     if self.require_calibration and self.initialized and (not self.calibration_initialized):
+
+                        self.gaussians.optimizer.zero_grad()
 
                         n_view_calib = 5
                         frames_to_optimize = self.config["Training"]["pose_window"]
@@ -734,22 +735,21 @@ class BackEnd(mp.Process):
                         # number of keyframes after calibration change
                         if (self.calib_id_cnt == n_view_calib):
 
-                            self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
-
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)
+                            self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="SGD") 
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002/n_view_calib)
+                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf)
 
                             self.multiview_calibration_refinement(iters = 30, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
 
+                            # self.gaussians.densify_and_prune(
+                            #     self.opt_params.densify_grad_threshold,
+                            #     self.gaussian_th,
+                            #     self.gaussian_extent,
+                            #     self.size_threshold,
+                            # )
+
                             self.calibration_initialized = True
                             Log("Calibration Initialized")
-
-                            self.gaussians.densify_and_prune(
-                                self.opt_params.densify_grad_threshold,
-                                self.gaussian_th,
-                                self.gaussian_extent,
-                                self.size_threshold,
-                            )
 
                         elif (self.calib_id_cnt == 1):
 
@@ -760,8 +760,8 @@ class BackEnd(mp.Process):
                         elif (self.calib_id_cnt == 2):
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.001)
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
+                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf)
 
                         else:
                             pass
@@ -791,7 +791,8 @@ class BackEnd(mp.Process):
                     if self.monocular and (not self.calibration_initialized):
                         depth_map = self.create_rendered_depthmap(viewpoint)
 
-                    self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map) 
+                    if not (self.calib_id_cnt == 1):
+                        self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map) 
 
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)

@@ -523,17 +523,18 @@ class FrontEnd(mp.Process):
                     """
                     # Adam+SGD, at the same scale
                     lr = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = scale_t,  learning_rate = 0.1,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
+                    lr = min(lr, 0.2) # safe-guard
                     _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False, gaussian_scale_t = scale_t,  learning_rate = lr,    max_iter_num = 20, step_safe_guard = True )
 
                     """
                     at scale 0
                     """
                     # focal should be close to ground-truth now, but not accurate if the pose changes a lot
-                    # _  = self.init_focal (viewpoint, optimizer_type = "Adam", image_grad_mask=False, gaussian_scale_t = 0.0,      learning_rate = 0.001,  max_iter_num = 30, step_safe_guard = False, save_info=save_info)
-                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
+                    # _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
                     
                 if (not self.calibration_keyframe_sent):
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )                    
+                    # render_pkg = self.tracking(cur_frame_idx, viewpoint)
                     # _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
                     # render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=False)
                     render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
