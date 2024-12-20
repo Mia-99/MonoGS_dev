@@ -616,7 +616,7 @@ class BackEnd(mp.Process):
                         self.size_threshold,
                     )
 
-                    self.map(self.current_window, iters=15 )
+                    self.map(self.current_window, iters=10 )
                     self.map(self.current_window, prune=True, iters=1)
                     self.push_to_frontend()
 
@@ -752,7 +752,7 @@ class BackEnd(mp.Process):
                             
                             if self.monocular:
                                 depth_map = self.create_rendered_depthmap(cur_keyframe)
-                                self.add_next_kf(idx, cur_keyframe, depth_map=depth_map)
+                                self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
