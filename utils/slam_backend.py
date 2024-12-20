@@ -775,7 +775,7 @@ class BackEnd(mp.Process):
                             #     self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002 * 0.25)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
                             self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf)
 
                             
