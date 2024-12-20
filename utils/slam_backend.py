@@ -48,7 +48,6 @@ class BackEnd(mp.Process):
         self.require_calibration = False
         self.allow_lens_distortion = False
         self.signal_calibration_change = False
-        self.calib_id_cnt = 0
         self.calibration_initialized = True
         self.calibration_keyframe_idx = 0
         self.calibration_window = []
@@ -578,10 +577,15 @@ class BackEnd(mp.Process):
                 if self.single_thread:
                     time.sleep(0.01)
                     continue
-                if self.calibration_initialized:
-                    self.map(self.current_window)
+
+                """
+                operations to peform when awaiting frontend
+                """
+                if len(self.calibration_window):
+                    self.map(self.current_window, calibrate=len(self.calibration_window), fix_gaussian=len(self.calibration_window))
                 else:
-                    self.map(self.current_window, calibrate=1, fix_gaussian=True)
+                    self.map(self.current_window)
+                                
                 if self.last_sent >= 10:
                     self.map(self.current_window, prune=True, iters=10)
                     self.push_to_frontend()
@@ -646,8 +650,6 @@ class BackEnd(mp.Process):
                     if self.signal_calibration_change:
                         self.calibration_keyframe_idx = cur_frame_idx
                         self.calibration_initialized = False
-                        self.calib_id_cnt = 0
-                    self.calib_id_cnt += 1
 
 
                     self.viewpoints[cur_frame_idx] = viewpoint
@@ -742,8 +744,6 @@ class BackEnd(mp.Process):
 
                         self.calibration_window.append(cur_frame_idx)
 
-                        self.gaussians.optimizer.zero_grad()
-
                         n_view_calib = 3
                         frames_to_optimize = self.config["Training"]["pose_window"]
                         n_view_calib = min(n_view_calib, frames_to_optimize)
@@ -752,10 +752,10 @@ class BackEnd(mp.Process):
                         W = cur_keyframe.image_width
                         focal_ref = np.sqrt(H*H + W*W)/2
                         window_id_cnt = sum(i >= self.calibration_keyframe_idx for i in self.current_window)                       
-                        rich.print(f"[bold green]calibration optimizer[/bold green]:\n\tcurrent_window: {self.current_window}\n\tcalibration_keyframe_idx: {self.calibration_keyframe_idx}\n\tno. calibration views in window: {window_id_cnt}/{self.calib_id_cnt}")
+                        rich.print(f"[bold green]calibration optimizer[/bold green]:\n\tcurrent_window: {self.current_window}\n\tcalibration_window: {self.calibration_window}\n\tcalibration_keyframe_idx: {self.calibration_keyframe_idx}\n\tno. calibration views in window: {window_id_cnt}/{len(self.calibration_window)}")
                         
                         # number of keyframes after calibration change
-                        if (self.calib_id_cnt == n_view_calib):
+                        if (len(self.calibration_window) == n_view_calib):
 
                             if self.monocular:
                                 for cam_id in self.calibration_window:
@@ -769,7 +769,7 @@ class BackEnd(mp.Process):
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf)
+                            self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf)
 
                             # self.multiview_calibration_refinement(iters = 10, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
                             # self.gaussians.densify_and_prune(
@@ -784,17 +784,17 @@ class BackEnd(mp.Process):
                             Log("Calibration Initialized")
 
 
-                        elif (self.calib_id_cnt == 1):
+                        elif (len(self.calibration_window) == 1):
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)
+                            self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf, fix_gaussian=True)
 
-                        elif (self.calib_id_cnt == 2):
+                        elif (len(self.calibration_window) == 2):
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
-                            self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf, fix_gaussian=True)
+                            self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf, fix_gaussian=True)
 
 
                         # """
