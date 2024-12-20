@@ -778,14 +778,6 @@ class BackEnd(mp.Process):
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002 * 0.5)
                             self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf)
 
-                            # self.multiview_calibration_refinement(iters = 10, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
-                            # self.gaussians.densify_and_prune(
-                            #     self.opt_params.densify_grad_threshold,
-                            #     self.gaussian_th,
-                            #     self.gaussian_extent,
-                            #     self.size_threshold,
-                            # )
-                            # self.map(self.current_window, iters=iter_per_kf)
                             
                             self.calibration_initialized = True
                             
