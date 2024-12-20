@@ -582,7 +582,8 @@ class BackEnd(mp.Process):
                 operations to peform when awaiting frontend
                 """
                 if len(self.calibration_window):
-                    self.map(self.current_window, calibrate=len(self.calibration_window), fix_gaussian=len(self.calibration_window))
+                    fix_gaussian= ( len(self.calibration_window) == 1 ) # allows two-view Gaussian optimization before adding the third view
+                    self.map(self.current_window, calibrate=len(self.calibration_window), fix_gaussian=fix_gaussian)
                 else:
                     self.map(self.current_window)
                                 
@@ -726,7 +727,6 @@ class BackEnd(mp.Process):
                     self.gaussians.optimizer.zero_grad()
 
 
-
                     """
                     Add new points from depth map
                     """
@@ -734,6 +734,11 @@ class BackEnd(mp.Process):
 
                     if (not self.monocular) or self.calibration_initialized:
                         self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map) 
+
+
+                    if self.calibration_initialized and len(self.calibration_window):
+                        self.calibration_window.clear()
+                        Log("Calibration Initialized")
 
                     """
                     Uncalibrated Dense Bundle Adjustment (pose, Gaussians, calibration)
@@ -758,14 +763,8 @@ class BackEnd(mp.Process):
                         if (len(self.calibration_window) == n_view_calib):
 
                             if self.monocular:
-                                for cam_id in self.calibration_window:
-                                    viewpoint = self.viewpoints[cam_id]
-                                    depth_map = self.create_rendered_depthmap(viewpoint)
-                                    self.add_next_kf(cam_id, viewpoint, depth_map=depth_map)
-
-                            # if self.monocular:
-                            #     depth_map = self.create_rendered_depthmap(cur_keyframe)
-                            #     self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
+                                depth_map = self.create_rendered_depthmap(cur_keyframe)
+                                self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
@@ -781,7 +780,7 @@ class BackEnd(mp.Process):
                             # self.map(self.current_window, iters=iter_per_kf)
                             
                             self.calibration_initialized = True
-                            Log("Calibration Initialized")
+                            
 
 
                         elif (len(self.calibration_window) == 1):
@@ -795,6 +794,12 @@ class BackEnd(mp.Process):
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
                             self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf, fix_gaussian=True)
+
+                            if self.monocular:
+                                for cam_id in self.calibration_window:
+                                    viewpoint = self.viewpoints[cam_id]
+                                    depth_map = self.create_rendered_depthmap(viewpoint)
+                                    self.add_next_kf(cam_id, viewpoint, depth_map=depth_map)
 
 
                         # """
@@ -813,9 +818,6 @@ class BackEnd(mp.Process):
                                 assert viewpoint.calib_id == current_calib_id, f"slam_backend. calib_id mismatch: {viewpoint.calib_id=}\t{current_calib_id=}"
                                 viewpoint.update_calibration(kf_calib[0], kf_calib[1], kf_calib[2])                    
                         
-                        if self.calibration_initialized:
-                            self.calibration_window.clear()
-
 
                     else:
                         
