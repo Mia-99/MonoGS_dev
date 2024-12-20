@@ -583,8 +583,8 @@ class BackEnd(mp.Process):
                 """
                 if len(self.calibration_window):
                     # if len(self.calibration_window) == 1 only, this allows two-view Gaussian optimization before adding the third view
-                    # fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
-                    fix_gaussian= ( len(self.calibration_window) == 1 )
+                    fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
+                    # fix_gaussian= ( len(self.calibration_window) == 1 )
                     self.map(self.current_window, calibrate=len(self.calibration_window), fix_gaussian=fix_gaussian)
                 else:
                     self.map(self.current_window)
@@ -627,7 +627,7 @@ class BackEnd(mp.Process):
                         self.gaussian_extent,
                         self.size_threshold,
                     )
-                    self.map(self.current_window, iters=20 )
+                    self.map(self.current_window, iters=10 )
                     self.map(self.current_window, prune=True, iters=1)
                     self.push_to_frontend()
                     rich.print("[bold red]Backend : calibration change signal processed [/bold red]")   
@@ -775,7 +775,7 @@ class BackEnd(mp.Process):
                             #     self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002 * 0.5)
                             self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf)
 
                             # self.multiview_calibration_refinement(iters = 10, focal_optimizer_type="SGD", lr=0.002/n_view_calib)
