@@ -537,11 +537,25 @@ class FrontEnd(mp.Process):
                     _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.1, max_iter_num = 20, step_safe_guard = True )
                     
                 if (not self.calibration_keyframe_sent):
-                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 10, step_safe_guard = True )
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint)
-                    # _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
-                    # render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=False)
-                    render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
+
+                    frontend_strategy = 2
+
+                    if frontend_strategy == 1:
+
+                        # ATE: 0.03172540502845
+                        render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                        _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.1, max_iter_num = 10, step_safe_guard = True )
+                        render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
+
+                    elif frontend_strategy == 2:
+
+                        render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
+                        _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.1, max_iter_num = 10, step_safe_guard = True )
+
+                    elif frontend_strategy == 3:
+
+                        pass
+
 
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
