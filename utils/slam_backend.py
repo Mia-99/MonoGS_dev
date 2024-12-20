@@ -716,6 +716,8 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers.zero_grad()
                     self.calibration_optimizers = None
 
+                    self.gaussians.optimizer.zero_grad()
+
 
 
                     """
