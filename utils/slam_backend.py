@@ -615,10 +615,10 @@ class BackEnd(mp.Process):
                         self.gaussian_extent,
                         self.size_threshold,
                     )
-
-                    self.map(self.current_window, iters=10 )
+                    self.map(self.current_window, iters=20 )
                     self.map(self.current_window, prune=True, iters=1)
                     self.push_to_frontend()
+                    rich.print("[bold red]Backend : calibration change signal processed [/bold red]")   
 
                 elif data[0] == "keyframe":
                     cur_frame_idx = data[1]
@@ -749,10 +749,16 @@ class BackEnd(mp.Process):
                         
                         # number of keyframes after calibration change
                         if (self.calib_id_cnt == n_view_calib):
-                            
+
                             if self.monocular:
-                                depth_map = self.create_rendered_depthmap(cur_keyframe)
-                                self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
+                                for cam_id in self.calibration_window:
+                                    viewpoint = self.viewpoints[cam_id]
+                                    depth_map = self.create_rendered_depthmap(viewpoint)
+                                    self.add_next_kf(cam_id, viewpoint, depth_map=depth_map)
+
+                            # if self.monocular:
+                            #     depth_map = self.create_rendered_depthmap(cur_keyframe)
+                            #     self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
@@ -783,11 +789,6 @@ class BackEnd(mp.Process):
                             self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
                             self.map(self.current_window, calibrate=self.calib_id_cnt, iters=iter_per_kf)
 
-                            if self.monocular:
-                                for idx in self.calibration_window:
-                                    viewpoint = self.viewpoints[idx]
-                                    depth_map = self.create_rendered_depthmap(viewpoint)
-                                    self.add_next_kf(idx, viewpoint, depth_map=depth_map)
 
                         # """
                         # push new calibration to frontend immediately
@@ -814,9 +815,9 @@ class BackEnd(mp.Process):
                         """
                         Dense Bundle Adjustment (pose, Gaussians)
                         """
-                        self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
-                        self.keyframe_optimizers.zero_grad()
-                        self.calibration_optimizers = None
+                        # self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
+                        # self.keyframe_optimizers.zero_grad()
+                        # self.calibration_optimizers = None
 
                         self.map(self.current_window, iters=iter_per_kf)
 

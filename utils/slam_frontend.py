@@ -534,10 +534,10 @@ class FrontEnd(mp.Process):
                     at scale 0
                     """
                     # focal should be close to ground-truth now, but not accurate if the pose changes a lot
-                    # _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
+                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 20, step_safe_guard = True )
                     
                 if (not self.calibration_keyframe_sent):
-                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )                    
+                    _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 10, step_safe_guard = True )
                     # render_pkg = self.tracking(cur_frame_idx, viewpoint)
                     # _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.01, max_iter_num = 30, step_safe_guard = True )
                     # render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=False)
@@ -562,6 +562,7 @@ class FrontEnd(mp.Process):
                 )
 
                 if self.requested_keyframe > 0:
+                    Log(f"Frontend cannot send frame: {cur_frame_idx=}, becuase {self.requested_keyframe=}")
                     self.cleanup(cur_frame_idx)
                     cur_frame_idx += 1
                     continue
