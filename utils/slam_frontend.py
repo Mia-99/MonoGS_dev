@@ -196,7 +196,7 @@ class FrontEnd(mp.Process):
             }
         )
 
-        tracking_itr_num = self.tracking_itr_num * 2 if focal_optimizer_type is not None else self.tracking_itr_num
+        tracking_itr_num = self.tracking_itr_num #* 2 if focal_optimizer_type is not None else self.tracking_itr_num
 
         pose_optimizer = torch.optim.Adam(opt_params)
         for tracking_itr in range(tracking_itr_num):
@@ -538,7 +538,7 @@ class FrontEnd(mp.Process):
                     
                 if (not self.calibration_keyframe_sent):
 
-                    frontend_strategy = 2
+                    frontend_strategy = 3
 
                     if frontend_strategy == 1:
 
@@ -554,8 +554,9 @@ class FrontEnd(mp.Process):
 
                     elif frontend_strategy == 3:
 
-                        pass
-
+                        render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                        render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
+                        _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.1, max_iter_num = 10, step_safe_guard = True )
 
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
