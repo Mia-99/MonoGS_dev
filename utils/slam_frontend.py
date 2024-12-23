@@ -19,6 +19,7 @@ from optimizers import CalibrationOptimizer, PoseOptimizer, lr_exp_decay_helper
 from gaussian_scale_space import image_conv_gaussian_separable
 import copy
 import rich
+from PIL import Image
 
 import matplotlib.pyplot as plt
 import os
@@ -166,18 +167,22 @@ class FrontEnd(mp.Process):
         # print(f"len(self.cameras) = {len(self.cameras)},  cur_frame_idx = {cur_frame_idx},  self.use_every_n_frames = {self.use_every_n_frames}")
         # print(f"prev = {prev.uid},   viewpoint = {viewpoint.uid}")
 
+        lr_scale_factor = 0.5 if calibration_optimizers is not None else 1.0
+
         opt_params = []
         opt_params.append(
             {
                 "params": [viewpoint.cam_rot_delta],
-                "lr": self.config["Training"]["lr"]["cam_rot_delta"],
+                "lr": self.config["Training"]["lr"]["cam_rot_delta"]
+                * lr_scale_factor,
                 "name": "rot_{}".format(viewpoint.uid),
             }
         )
         opt_params.append(
             {
                 "params": [viewpoint.cam_trans_delta],
-                "lr": self.config["Training"]["lr"]["cam_trans_delta"],
+                "lr": self.config["Training"]["lr"]["cam_trans_delta"]
+                * lr_scale_factor,
                 "name": "trans_{}".format(viewpoint.uid),
             }
         )
@@ -196,7 +201,7 @@ class FrontEnd(mp.Process):
             }
         )
 
-        tracking_itr_num = self.tracking_itr_num #* 2 if focal_optimizer_type is not None else self.tracking_itr_num
+        tracking_itr_num = self.tracking_itr_num * 2 if calibration_optimizers is not None else self.tracking_itr_num
 
         pose_optimizer = torch.optim.Adam(opt_params)
         for tracking_itr in range(tracking_itr_num):
@@ -219,8 +224,8 @@ class FrontEnd(mp.Process):
             with torch.no_grad():
                 if calibration_optimizers is not None:
                     calibration_optimizers.focal_step() # add update focal
-                    # if self.allow_lens_distortion and tracking_itr > 15:
-                    #     calibration_optimizers.kappa_step() # add update kappa
+                    if self.allow_lens_distortion and tracking_itr > 10:
+                        calibration_optimizers.kappa_step() # add update kappa
                     calibration_optimizers.zero_grad(set_to_none=True)
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
@@ -514,6 +519,9 @@ class FrontEnd(mp.Process):
 
                 # TUNING PARAMETERS
                 if self.require_calibration and self.initialized and self.signal_calibration_change:
+                    """
+                    Focal-length initialization
+                    """
 
                     self.calibration_initialized = False
 
@@ -537,7 +545,10 @@ class FrontEnd(mp.Process):
                     _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=False,  gaussian_scale_t = 0.0,  learning_rate = 0.1, max_iter_num = 20, step_safe_guard = True )
                     
                 if (not self.calibration_keyframe_sent):
-
+                    """
+                    Pose initialization
+                    Pose and focal-length joint refinement
+                    """
                     frontend_strategy = 3
 
                     if frontend_strategy == 1:
@@ -557,6 +568,7 @@ class FrontEnd(mp.Process):
                         render_pkg = self.tracking(cur_frame_idx, viewpoint)
                         render_pkg = self.tracking(cur_frame_idx, viewpoint, focal_optimizer_type = "SGD",  learning_rate=0.001, grad_mask=True)
                         _  = self.init_focal (viewpoint, optimizer_type = "SGD",  image_grad_mask=True,  gaussian_scale_t = 0.0,  learning_rate = 0.1, max_iter_num = 10, step_safe_guard = True )
+
 
                 else:
                     render_pkg = self.tracking(cur_frame_idx, viewpoint)
@@ -831,6 +843,7 @@ class FrontEnd(mp.Process):
             plt.imshow(cv2.cvtColor(image,cv2.COLOR_BGR2RGB))
         '''
         image = torch.clamp(image, min=0, max=1.0) * 255
-        rgb = image.byte().permute(1, 2, 0).contiguous().cpu().numpy()
-        plt.imsave(filename, rgb)
+        rgb = image.byte().permute(1, 2, 0).contiguous().cpu().numpy()        
+        Image.fromarray(rgb).save(filename)
+        # plt.imsave(filename, rgb)
 
