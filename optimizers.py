@@ -143,26 +143,26 @@ class CalibrationOptimizer:
 
     # update cameras with calib_id
     def __update_focal_estimates (self, calib_id):
-        for calib_id, cam_stack in self.calibration_groups.items():
-            if calib_id == calib_id:
-                focal_delta_normalized = self.focal_delta_groups [ calib_id ].data.cpu().numpy()[0]
+        for cam_calib_id, cam_stack in self.calibration_groups.items():
+            if cam_calib_id == calib_id:
+                focal_delta_normalized = self.focal_delta_groups [ cam_calib_id ].data.cpu().numpy()[0]
                 focal_delta = focal_delta_normalized * self.focal_normalizer  # real_focal = normalized_focal * normalizer
-                focal_grad_normalized  = self.focal_delta_groups [ calib_id ].grad.cpu().numpy()[0]
+                focal_grad_normalized  = self.focal_delta_groups [ cam_calib_id ].grad.cpu().numpy()[0]
                 for viewpoint_cam in cam_stack:
                     focal = viewpoint_cam.fx
                     viewpoint_cam.fx += focal_delta
-                    viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta
-                print(f">> opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_normalized: {focal_delta_normalized:.7f}, grad_normalized: {focal_grad_normalized:.7f}")
+                    viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta                
+                print(f">> opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_normalized: {focal_delta_normalized:.7f}, grad_normalized: {focal_grad_normalized:.7f}, camera_center: {viewpoint_cam.camera_center}")
                 return focal/self.focal_normalizer, focal_grad_normalized
 
 
 
     # update cameras' with calib_id
     def __update_kappa_estimates (self, calib_id):
-        for calib_id, cam_stack in self.calibration_groups.items():
-            if calib_id == calib_id:
-                kappa_delta = self.kappa_delta_groups [ calib_id ].data.cpu().numpy()[0]
-                kappa_grad  = self.kappa_delta_groups [ calib_id ].grad.cpu().numpy()[0]
+        for cam_calib_id, cam_stack in self.calibration_groups.items():
+            if cam_calib_id == calib_id:
+                kappa_delta = self.kappa_delta_groups [ cam_calib_id ].data.cpu().numpy()[0]
+                kappa_grad  = self.kappa_delta_groups [ cam_calib_id ].grad.cpu().numpy()[0]
                 # print(f">>opt_kappa={kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
                 for viewpoint_cam in cam_stack:
                     viewpoint_cam.kappa += kappa_delta
