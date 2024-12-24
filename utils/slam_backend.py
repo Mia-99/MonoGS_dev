@@ -380,6 +380,7 @@ class BackEnd(mp.Process):
 
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in current_window]
         frames_to_optimize = self.config["Training"]["pose_window"]
+        frames_to_optimize = min(frames_to_optimize, calibrate)
 
         for cur_itr in range(iters):      
             self.last_sent += 1
@@ -570,8 +571,8 @@ class BackEnd(mp.Process):
                 """
                 if len(self.calibration_window):
                     # if len(self.calibration_window) == 1 only, this allows two-view Gaussian optimization before adding the third view
-                    fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
-                    # fix_gaussian= ( len(self.calibration_window) == 1 )
+                    # fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
+                    fix_gaussian= ( len(self.calibration_window) == 1 )
                     self.map(self.current_window, calibrate=len(self.calibration_window), fix_gaussian=fix_gaussian)
                 else:
                     self.map(self.current_window)
