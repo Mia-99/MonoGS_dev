@@ -161,9 +161,9 @@ class BackEnd(mp.Process):
     def map(self, current_window, prune=False, calibrate=0, fix_gaussian = False, iters=1):
         if len(current_window) == 0:
             return        
-        # if fix_gaussian:
-        #     self.map_fix_gaussian (current_window, calibrate=calibrate, iters=iters)            
-        #     return False
+        if fix_gaussian:
+            self.map_fix_gaussian (current_window, calibrate=calibrate, iters=iters)            
+            return False
 
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in current_window]
         random_viewpoint_stack = []
