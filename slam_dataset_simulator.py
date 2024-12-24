@@ -197,6 +197,7 @@ class SLAM_Dataset_Simulator:
                     'lr_cnt2': 0.0002                    
             }
         }
+        new_config["Dataset"]["Calibration"]["distorted"] = False
         with open(new_config_filename, 'w') as file:
             yaml.safe_dump(new_config, file, sort_keys=False)
 
