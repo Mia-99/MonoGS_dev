@@ -162,10 +162,10 @@ class BackEnd(mp.Process):
         if len(current_window) == 0:
             return
 
-        # self.keyframe_optimizers.zero_grad(set_to_none=True)
-        # self.gaussians.optimizer.zero_grad(set_to_none=True)
-        # if self.calibration_optimizers is not None:
-        #     self.calibration_optimizers.zero_grad(set_to_none=True)
+        self.keyframe_optimizers.zero_grad(set_to_none=True)
+        self.gaussians.optimizer.zero_grad(set_to_none=True)
+        if self.calibration_optimizers is not None:
+            self.calibration_optimizers.zero_grad(set_to_none=True)
 
         if fix_gaussian:
             self.map_fix_gaussian (current_window=current_window, calibrate=calibrate, iters=iters)
@@ -700,20 +700,21 @@ class BackEnd(mp.Process):
                             )
                             calib_opt_frames_stack.append(viewpoint)
 
-                        pose_opt_params.append(
-                            {
-                                "params": [viewpoint.exposure_a],
-                                "lr": 0.01,
-                                "name": "exposure_a_{}".format(viewpoint.uid),
-                            }
-                        )
-                        pose_opt_params.append(
-                            {
-                                "params": [viewpoint.exposure_b],
-                                "lr": 0.01,
-                                "name": "exposure_b_{}".format(viewpoint.uid),
-                            }
-                        )
+                        if (self.calibration_initialized) or (viewpoint.calib_id == current_calib_id):
+                            pose_opt_params.append(
+                                {
+                                    "params": [viewpoint.exposure_a],
+                                    "lr": 0.01,
+                                    "name": "exposure_a_{}".format(viewpoint.uid),
+                                }
+                            )
+                            pose_opt_params.append(
+                                {
+                                    "params": [viewpoint.exposure_b],
+                                    "lr": 0.01,
+                                    "name": "exposure_b_{}".format(viewpoint.uid),
+                                }
+                            )
 
 
                     self.keyframe_optimizers = torch.optim.Adam(pose_opt_params)
