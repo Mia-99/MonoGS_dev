@@ -384,7 +384,7 @@ class BackEnd(mp.Process):
 
 
     def map_fix_gaussian (self, current_window, calibrate=0, iters=1):
-        print(f"@map_fix_gaussian  {current_window=}, {calibrate=}, {iters=}")
+        print(f"\n@run map_fix_gaussian  {current_window=}, {calibrate=}, {iters=}")
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in current_window]
         frames_to_optimize = self.config["Training"]["pose_window"]
         frames_to_optimize = min(frames_to_optimize, calibrate)   
