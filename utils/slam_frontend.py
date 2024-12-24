@@ -167,7 +167,8 @@ class FrontEnd(mp.Process):
         # print(f"len(self.cameras) = {len(self.cameras)},  cur_frame_idx = {cur_frame_idx},  self.use_every_n_frames = {self.use_every_n_frames}")
         # print(f"prev = {prev.uid},   viewpoint = {viewpoint.uid}")
 
-        lr_scale_factor = 0.5 if calibration_optimizers is not None else 1.0
+        lr_scale_factor = 1.0 if calibration_optimizers is not None else 1.0
+        tracking_itr_num = self.tracking_itr_num * 1 if calibration_optimizers is not None else self.tracking_itr_num
 
         opt_params = []
         opt_params.append(
@@ -200,8 +201,7 @@ class FrontEnd(mp.Process):
                 "name": "exposure_b_{}".format(viewpoint.uid),
             }
         )
-
-        tracking_itr_num = self.tracking_itr_num * 2 if calibration_optimizers is not None else self.tracking_itr_num
+        
 
         pose_optimizer = torch.optim.Adam(opt_params)
         for tracking_itr in range(tracking_itr_num):
@@ -224,8 +224,8 @@ class FrontEnd(mp.Process):
             with torch.no_grad():
                 if calibration_optimizers is not None:
                     calibration_optimizers.focal_step() # add update focal
-                    if self.allow_lens_distortion and tracking_itr > 10:
-                        calibration_optimizers.kappa_step() # add update kappa
+                    # if self.allow_lens_distortion and tracking_itr > 10:
+                    #     calibration_optimizers.kappa_step() # add update kappa
                     calibration_optimizers.zero_grad(set_to_none=True)
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)

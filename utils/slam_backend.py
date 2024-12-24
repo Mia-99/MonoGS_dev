@@ -338,6 +338,13 @@ class BackEnd(mp.Process):
                             self.calibration_optimizers.kappa_step()
                 if self.calibration_optimizers is not None:
                     self.calibration_optimizers.zero_grad(set_to_none=True)
+                # if self.calibration_optimizers is not None:
+                #     if calibrate and self.require_calibration and self.initialized:
+                #         self.calibration_optimizers.focal_step()
+                #         if self.allow_lens_distortion and cur_itr > 5:
+                #             self.calibration_optimizers.kappa_step()
+                #     self.calibration_optimizers.zero_grad(set_to_none=True)
+
 
                 # Pose update
                 self.keyframe_optimizers.step()
