@@ -162,10 +162,10 @@ class BackEnd(mp.Process):
         if len(current_window) == 0:
             return
 
-        self.keyframe_optimizers.zero_grad(set_to_none=True)
-        self.gaussians.optimizer.zero_grad(set_to_none=True)
-        if self.calibration_optimizers is not None:
-            self.calibration_optimizers.zero_grad(set_to_none=True)
+        # self.keyframe_optimizers.zero_grad(set_to_none=True)
+        # self.gaussians.optimizer.zero_grad(set_to_none=True)
+        # if self.calibration_optimizers is not None:
+        #     self.calibration_optimizers.zero_grad(set_to_none=True)
 
         if fix_gaussian:
             # self.map_fix_gaussian (current_window=self.calibration_window, calibrate=calibrate, iters=iters)
@@ -384,7 +384,7 @@ class BackEnd(mp.Process):
 
 
     def map_fix_gaussian (self, current_window, calibrate=0, iters=1):
-        print(f"\n@run map_fix_gaussian  {current_window=}, {calibrate=}, {iters=}")
+        # print(f"\n@run map_fix_gaussian  {current_window=}, {calibrate=}, {iters=}")
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in current_window]
         frames_to_optimize = self.config["Training"]["pose_window"]
         frames_to_optimize = min(frames_to_optimize, calibrate)   

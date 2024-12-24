@@ -136,7 +136,7 @@ class SLAM_Dataset_Simulator:
                         )
         viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt)
 
-        if fx and fy and kappa:
+        if (fx is not None) and (fy is not None) and (kappa is not None):
             viewpoint.update_calibration (fx, fy, kappa)
         
         render_pkg = render(
