@@ -160,7 +160,10 @@ class BackEnd(mp.Process):
 
     def map(self, current_window, prune=False, calibrate=0, fix_gaussian = False, iters=1):
         if len(current_window) == 0:
-            return
+            return        
+        # if fix_gaussian:
+        #     self.map_fix_gaussian (current_window, calibrate=calibrate, iters=iters)            
+        #     return False
 
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in current_window]
         random_viewpoint_stack = []
@@ -370,6 +373,67 @@ class BackEnd(mp.Process):
                 
 
         return gaussian_split
+    
+
+
+    def map_fix_gaussian (self, current_window, calibrate=0, iters=1):
+
+        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in current_window]
+        frames_to_optimize = self.config["Training"]["pose_window"]
+
+        for cur_itr in range(iters):      
+            self.last_sent += 1
+
+            loss_mapping = 0
+            for cam_idx in range(len(current_window)):
+                viewpoint = viewpoint_stack[cam_idx]
+                render_pkg = render(
+                    viewpoint, self.gaussians, self.pipeline_params, self.background
+                )
+                (
+                    image,
+                    viewspace_point_tensor,
+                    visibility_filter,
+                    radii,
+                    depth,
+                    opacity,
+                    n_touched,
+                ) = (
+                    render_pkg["render"],
+                    render_pkg["viewspace_points"],
+                    render_pkg["visibility_filter"],
+                    render_pkg["radii"],
+                    render_pkg["depth"],
+                    render_pkg["opacity"],
+                    render_pkg["n_touched"],
+                )
+                # use tracking loss here
+                loss_mapping += get_loss_tracking(
+                                self.config, image, depth, opacity, viewpoint
+                )
+                # loss_mapping += get_loss_mapping(
+                #     self.config, image, depth, viewpoint, opacity
+                # )
+            loss_mapping.backward()
+
+            with torch.no_grad():
+                if self.calibration_optimizers is not None:
+                    if calibrate and self.require_calibration and self.initialized:
+                        self.calibration_optimizers.focal_step()
+                        if self.allow_lens_distortion and cur_itr > 5:
+                            self.calibration_optimizers.kappa_step()
+                    self.calibration_optimizers.zero_grad(set_to_none=True)
+
+                self.keyframe_optimizers.step()
+                self.keyframe_optimizers.zero_grad(set_to_none=True)
+                for cam_idx in range(min(frames_to_optimize, len(current_window))):
+                    viewpoint = viewpoint_stack[cam_idx]
+                    if viewpoint.uid == 0:
+                        continue
+                    update_pose(viewpoint)
+
+                self.gaussians.optimizer.zero_grad(set_to_none=True)
+        return
 
 
 
@@ -407,6 +471,7 @@ class BackEnd(mp.Process):
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
                 self.gaussians.update_learning_rate(iteration)
         Log("Map refinement done")
+        return
 
     def push_to_frontend(self, tag=None):
         self.last_sent = 0
@@ -427,86 +492,6 @@ class BackEnd(mp.Process):
             print(f"cam_id: {cam_id}: \tcalib_id: {viewpoint.calib_id}: fx = {viewpoint.fx:.3f}, fy = {viewpoint.fy:.3f}, kappa = {viewpoint.kappa:.6f}")        
         return
     
-
-    def multiview_calibration_refinement(self, iters = 30, focal_optimizer_type="SGD", lr=0.0001):
-        viewpoint_stack = []
-        pose_opt_params = []
-        for cam_id in self.calibration_window:
-            viewpoint = self.viewpoints[cam_id]
-            assert cam_id >= self.calibration_keyframe_idx
-            viewpoint_stack.append(viewpoint)
-            pose_opt_params.append(
-                {
-                    "params": [viewpoint.cam_rot_delta],
-                    "lr": self.config["Training"]["lr"]["cam_rot_delta"]
-                    * 0.25,
-                    "name": "rot_{}".format(viewpoint.uid),
-                }
-            )
-            pose_opt_params.append(
-                {
-                    "params": [viewpoint.cam_trans_delta],
-                    "lr": self.config["Training"]["lr"][
-                        "cam_trans_delta"
-                    ]
-                    * 0.25,
-                    "name": "trans_{}".format(viewpoint.uid),
-                }
-            )
-        rich.print(f"multiview_calibration_refinement: {self.calibration_window}")
-        # pose optimizer
-        pose_optimizers = torch.optim.Adam(pose_opt_params)
-        pose_optimizers.zero_grad()
-
-        # calibration optimizer
-        H = viewpoint_stack[0].image_height
-        W = viewpoint_stack[0].image_width
-        focal_ref = np.sqrt(H*H + W*W)/2
-        calibration_optimizers = CalibrationOptimizer(viewpoint_stack, focal_ref, focal_optimizer_type=focal_optimizer_type)
-        calibration_optimizers.update_focal_learning_rate(lr = lr)
-        
-        for cur_itr in range(iters):
-            loss = 0
-            for viewpoint in viewpoint_stack:
-                render_pkg = render(
-                    viewpoint, self.gaussians, self.pipeline_params, self.background
-                )
-                (
-                    image,
-                    depth,
-                    opacity
-                ) = (
-                    render_pkg["render"],
-                    render_pkg["depth"],
-                    render_pkg["opacity"]
-                )
-                # loss += get_loss_mapping(
-                #     self.config, image, depth, viewpoint, opacity
-                # )
-                loss += get_loss_tracking(
-                    self.config, image, depth, opacity, viewpoint
-                )
-            loss.backward()
-
-            with torch.no_grad():
-                # Calibration update
-                if self.require_calibration and self.initialized:
-                    calibration_optimizers.focal_step()
-                    if self.allow_lens_distortion and cur_itr > 2:
-                        calibration_optimizers.kappa_step()
-                calibration_optimizers.zero_grad(set_to_none=True)
-
-                # Pose update
-                pose_optimizers.step()
-                pose_optimizers.zero_grad(set_to_none=True)
-                for viewpoint in viewpoint_stack:
-                    if viewpoint.uid == 0:
-                        continue
-                    update_pose(viewpoint)
-
-        pose_optimizers = None
-        calibration_optimizers = None
-        Log("Multiview calibration refinement done")
 
 
 
