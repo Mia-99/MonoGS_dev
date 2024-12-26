@@ -387,7 +387,7 @@ class BackEnd(mp.Process):
         # print(f"\n@run map_fix_gaussian  {current_window=}, {calibrate=}, {iters=}")
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in current_window]
         frames_to_optimize = self.config["Training"]["pose_window"]
-        frames_to_optimize = min(frames_to_optimize, calibrate)
+        # frames_to_optimize = min(frames_to_optimize, calibrate)
 
         for cur_itr in range(iters):      
             self.last_sent += 1
@@ -578,8 +578,8 @@ class BackEnd(mp.Process):
                 """
                 if len(self.calibration_window):
                     # if len(self.calibration_window) == 1 only, this allows two-view Gaussian optimization before adding the third view
-                    # fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
-                    fix_gaussian= ( len(self.calibration_window) == 1 )
+                    fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
+                    # fix_gaussian= ( len(self.calibration_window) == 1 )
                     self.map(self.current_window, calibrate=len(self.calibration_window), fix_gaussian=fix_gaussian)
                 else:
                     self.map(self.current_window)
@@ -650,6 +650,10 @@ class BackEnd(mp.Process):
                         self.calibration_initialized = False
 
 
+                    if self.require_calibration and self.initialized and (not self.calibration_initialized):
+                        self.calibration_window.append(cur_frame_idx)
+
+
                     self.viewpoints[cur_frame_idx] = viewpoint
                     self.current_window = current_window
                     """
@@ -701,7 +705,7 @@ class BackEnd(mp.Process):
                             )
                             calib_opt_frames_stack.append(viewpoint)
 
-                        if (self.calibration_initialized) or (viewpoint.calib_id == current_calib_id):
+                        if (self.calibration_initialized) or (viewpoint.calib_id == current_calib_id) or len(self.calibration_window)>2:
                             pose_opt_params.append(
                                 {
                                     "params": [viewpoint.exposure_a],
@@ -743,9 +747,8 @@ class BackEnd(mp.Process):
 
                     In the monocular case, we can rerender depth map, however we need to think about when to add new points
                     """
-                    if self.require_calibration and self.initialized and (not self.calibration_initialized):
+                    if len(self.calibration_window) > 0:
 
-                        self.calibration_window.append(cur_frame_idx)
 
                         n_view_calib = 3
                         frames_to_optimize = self.config["Training"]["pose_window"]
