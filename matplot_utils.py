@@ -28,7 +28,7 @@ def annotate_image(image, cmap=plt.get_cmap('hot'), mytext = "my text", mytextt 
     need to specify axis range explicitly
     https://stackoverflow.com/questions/13018115/matplotlib-savefig-image-size-with-bbox-inches-tight
     '''
-    ax.imshow(image, cmap=cmap, interpolation='nearest')
+    im = ax.imshow(image, cmap=cmap, interpolation='nearest')
     
     '''
     Annotations
@@ -91,7 +91,7 @@ def annotate_image(image, cmap=plt.get_cmap('hot'), mytext = "my text", mytextt 
             clip_on = True,
             )
 
-    return fig, ax
+    return fig, ax, im
 
  
 
