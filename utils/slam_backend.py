@@ -577,8 +577,8 @@ class BackEnd(mp.Process):
                 """
                 if len(self.calibration_window):
                     # if len(self.calibration_window) == 1 only, this allows two-view Gaussian optimization before adding the third view
-                    # fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
-                    fix_gaussian= ( len(self.calibration_window) == 1 )
+                    fix_gaussian= ( len(self.calibration_window) == 1 or len(self.calibration_window) == 2)
+                    # fix_gaussian= ( len(self.calibration_window) == 1 )
                     self.map(self.current_window, calibrate=len(self.calibration_window), fix_gaussian=fix_gaussian)
                 else:
                     self.map(self.current_window)
@@ -773,7 +773,7 @@ class BackEnd(mp.Process):
                             #     self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.001)
                             self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf)
 
                             
