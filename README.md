@@ -38,6 +38,8 @@ pip install pycolmap
 pip install imgui
 pip install imageio
 pip install gtsam
+pip install pyscsp
+pip install scipy
 ```
 
 ## Installation
