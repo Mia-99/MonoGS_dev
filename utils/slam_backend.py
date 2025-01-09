@@ -704,7 +704,7 @@ class BackEnd(mp.Process):
                             )
                             calib_opt_frames_stack.append(viewpoint)
 
-                        if (self.calibration_initialized) or (viewpoint.calib_id != current_calib_id) or True:
+                        if (self.calibration_initialized) or (viewpoint.calib_id != current_calib_id):
                             pose_opt_params.append(
                                 {
                                     "params": [viewpoint.exposure_a],
