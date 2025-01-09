@@ -392,8 +392,7 @@ class BackEnd(mp.Process):
             self.last_sent += 1
 
             loss_mapping = 0
-            # for cam_idx in range(len(current_window)):
-            for cam_idx in range(min(frames_to_optimize, len(current_window))):
+            for cam_idx in range(len(current_window)):
                 viewpoint = viewpoint_stack[cam_idx]
                 render_pkg = render(
                     viewpoint, self.gaussians, self.pipeline_params, self.background
@@ -415,31 +414,32 @@ class BackEnd(mp.Process):
                     render_pkg["opacity"],
                     render_pkg["n_touched"],
                 )
-                # use tracking loss here                
+                # use tracking loss here
                 loss_mapping += get_loss_tracking(
                                 self.config, image, depth, opacity, viewpoint
-                ) 
-                # if cam_idx in self.calibration_window else get_loss_mapping(
+                )
+                # loss_mapping += get_loss_mapping(
                 #     self.config, image, depth, viewpoint, opacity
                 # )
             loss_mapping.backward()
 
             with torch.no_grad():
 
-                if (self.calibration_optimizers is not None):
-                    if calibrate and self.require_calibration and self.initialized:
+                if calibrate and self.require_calibration and self.initialized:
+                    if (self.calibration_optimizers is not None):
                         self.calibration_optimizers.focal_step()
                         if self.allow_lens_distortion and cur_itr > 5:
                             self.calibration_optimizers.kappa_step()
+                if self.calibration_optimizers is not None:
                     self.calibration_optimizers.zero_grad(set_to_none=True)
                 
-                self.keyframe_optimizers.step()                
+                self.keyframe_optimizers.step()
+                self.keyframe_optimizers.zero_grad(set_to_none=True)
                 for cam_idx in range(min(frames_to_optimize, len(current_window))):
                     viewpoint = viewpoint_stack[cam_idx]
                     if viewpoint.uid == 0:
                         continue
                     update_pose(viewpoint)
-                self.keyframe_optimizers.zero_grad(set_to_none=True)
 
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
         return
@@ -615,15 +615,15 @@ class BackEnd(mp.Process):
 
                 elif data[0] == "calibration_change":
                     rich.print("[bold red]Backend : calibration change signal recieved [/bold red]")                    
-                    # self.gaussians.densify_and_prune(
-                    #     self.opt_params.densify_grad_threshold,
-                    #     self.gaussian_th,
-                    #     self.gaussian_extent,
-                    #     self.size_threshold,
-                    # )
-                    # self.map(self.current_window, iters=10 )
-                    # self.map(self.current_window, prune=True, iters=1)
-                    # self.push_to_frontend()
+                    self.gaussians.densify_and_prune(
+                        self.opt_params.densify_grad_threshold,
+                        self.gaussian_th,
+                        self.gaussian_extent,
+                        self.size_threshold,
+                    )
+                    self.map(self.current_window, iters=10 )
+                    self.map(self.current_window, prune=True, iters=1)
+                    self.push_to_frontend()
                     rich.print("[bold red]Backend : calibration change signal processed [/bold red]")   
 
                 elif data[0] == "keyframe":
@@ -704,7 +704,7 @@ class BackEnd(mp.Process):
                             )
                             calib_opt_frames_stack.append(viewpoint)
 
-                        if (self.calibration_initialized) or (viewpoint.calib_id == current_calib_id) or len(self.calibration_window)>2:
+                        if (self.calibration_initialized) or (viewpoint.calib_id != current_calib_id) or True:
                             pose_opt_params.append(
                                 {
                                     "params": [viewpoint.exposure_a],
@@ -773,7 +773,7 @@ class BackEnd(mp.Process):
                             #     self.add_next_kf(cur_frame_idx, cur_keyframe, depth_map=depth_map)
 
                             self.calibration_optimizers = CalibrationOptimizer(calib_opt_frames_stack, focal_ref, focal_optimizer_type="Adam") 
-                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.001)
+                            self.calibration_optimizers.update_focal_learning_rate(lr = 0.002)
                             self.map(self.current_window, calibrate=len(self.calibration_window), iters=iter_per_kf)
 
                             

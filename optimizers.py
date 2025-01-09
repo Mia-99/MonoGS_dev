@@ -103,7 +103,7 @@ class CalibrationOptimizer:
         else:
             raise TypeError("Only SGD and Adam are supported for focal length optimization!")
         
-        self.kappa_optimizer = torch.optim.Adam(kappa_opt_params)
+        self.kappa_optimizer = torch.optim.SGD(kappa_opt_params)
 
 
 
@@ -152,7 +152,8 @@ class CalibrationOptimizer:
                     focal = viewpoint_cam.fx
                     viewpoint_cam.fx += focal_delta
                     viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta                
-                print(f">> opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_normalized: {focal_delta_normalized:.7f}, grad_normalized: {focal_grad_normalized:.7f}, camera_center: {viewpoint_cam.camera_center}")
+                    CC = viewpoint_cam.camera_center.cpu().numpy()
+                    print(f">> uid: [{viewpoint_cam.uid}], opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_n: {focal_delta_normalized:.7f}, grad_n: {focal_grad_normalized:.7f}, cam_center: [{CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}], exposure: [a: {viewpoint_cam.exposure_a.data.item():.5f}, b: {viewpoint_cam.exposure_b.data.item():.5f}]")
                 return focal/self.focal_normalizer, focal_grad_normalized
 
 
