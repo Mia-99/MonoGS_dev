@@ -825,8 +825,11 @@ class BackEnd(mp.Process):
                         self.map(self.current_window, iters=iter_per_kf)
 
                     self.map(self.current_window, prune=True)
-                    self.push_to_frontend("keyframe")                    
-                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {cur_keyframe.fx:.3f}, fy: {cur_keyframe.fy:.3f}, kappa: {cur_keyframe.kappa:.6f}, calib_id: {cur_keyframe.calib_id}, iter_per_kf: {iter_per_kf}\n")
+                    self.push_to_frontend("keyframe")
+                    CC = viewpoint.camera_center.cpu().numpy()
+                    exposure_a = viewpoint.exposure_a.data.item()
+                    exposure_b = viewpoint.exposure_b.data.item()
+                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {cur_keyframe.fx:.3f}, fy: {cur_keyframe.fy:.3f}, kappa: {cur_keyframe.kappa:.6f}, calib_id: {cur_keyframe.calib_id}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f}). iter_per_kf: {iter_per_kf}\n")
 
                 else:
                     raise Exception("Unprocessed data", data)

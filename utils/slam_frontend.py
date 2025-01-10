@@ -646,7 +646,10 @@ class FrontEnd(mp.Process):
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )
                     self.calibration_keyframe_sent = True
-                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}")
+                    CC = viewpoint.camera_center.cpu().numpy()
+                    exposure_a = viewpoint.exposure_a.data.item()
+                    exposure_b = viewpoint.exposure_b.data.item()
+                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f})")
                 else:
                     self.cleanup(cur_frame_idx)
                 cur_frame_idx += 1
