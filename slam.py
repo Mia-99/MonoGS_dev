@@ -270,7 +270,7 @@ if __name__ == "__main__":
     # options to overwrite config for test purpurses    
     parser.add_argument("--disable_selfcalibration", action="store_true", default=False, help='default=False. force to disable selfcalibration and overwrite config file') # overwrite config
     parser.add_argument("--disable_gui", action="store_true", default=False, help='default=False. force to disable gui') # overwrite config
-    
+    parser.add_argument("--use_gt_pose", action="store_true", default=False, help='default=False. use provided ground-truth poses') # use ground-truth poses
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -304,6 +304,11 @@ if __name__ == "__main__":
     if args.disable_gui:
         config["Results"]["use_gui"] = False
 
+    # use ground-truth poses
+    if args.use_gt_pose:
+        config["use_gt_pose"] = True
+        config["Training"]["single_thread"] = True
+        config["Dataset"]["single_thread"] = True
 
     if args.eval:
         Log("Running MonoGS in Evaluation Mode")

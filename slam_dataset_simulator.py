@@ -287,7 +287,52 @@ def main1():
 
 
 
+def main2():
+
+    config_file = "configs/mono/tum/fr2_xyz.yaml"
+    result_path = "results/tum/fr2_xyz_save"
+
+    sim = SLAM_Dataset_Simulator(config_file=config_file, result_path=result_path)
+
+    """
+    set calibration changes
+    """
+    sim.set_calibration(idx=100, fx=500, kappa=0.0)
+    sim.set_calibration(idx=200, fx=560, kappa=0.0)
+    sim.set_calibration(idx=300, fx=500, kappa=0.0)
+
+
+    new_config_filename = "configs/mono/tum/fr2_xyz_calib0.yaml"
+    output_data_dir = "/hdd/slam/tum_calib/fr2_xyz"    
+
+    sim.run(new_config_filename, output_data_dir)
+
+
+def main3():
+
+    config_file = "configs/mono/tum/fr3_office.yaml"
+    result_path = "results/tum/fr3_office_save"
+
+    sim = SLAM_Dataset_Simulator(config_file=config_file, result_path=result_path)
+
+    """
+    set calibration changes
+    """
+    sim.set_calibration(idx=100, fx=500, kappa=0.0)
+    sim.set_calibration(idx=200, fx=560, kappa=0.0)
+    sim.set_calibration(idx=300, fx=500, kappa=0.0)
+
+
+    new_config_filename = "configs/mono/tum/fr3_office_calib0.yaml"
+    output_data_dir = "/hdd/slam/tum_calib/fr3_office"    
+
+    sim.run(new_config_filename, output_data_dir)
+
+
+
 
 if __name__ == "__main__":
     main1()
+    main2()
+    main3()
 

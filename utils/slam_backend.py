@@ -52,6 +52,9 @@ class BackEnd(mp.Process):
         self.calibration_keyframe_idx = 0
         self.calibration_window = []
 
+        # use ground-truth poses for reconstruction, in which case poses will not be optimised
+        self.use_gt_pose = config.get("use_gt_pose", False)
+
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -346,29 +349,31 @@ class BackEnd(mp.Process):
                     self.calibration_optimizers.zero_grad(set_to_none=True)
 
                 # Pose update
-                self.keyframe_optimizers.step()
+                if not self.use_gt_pose:
+                    self.keyframe_optimizers.step()
                 self.keyframe_optimizers.zero_grad(set_to_none=True)
 
                 """
                 idea: don't update poses with a different calib_id, i.e., those poses before calibration.
                 It seems there is no reason to do so, as we may fix Gaussians directly?
                 """
-                if (not self.calibration_initialized) and calibrate==-1: # calibration with one view
-                    for cam_idx in range( len(current_window) ):
-                        viewpoint = viewpoint_stack[cam_idx]
-                        if viewpoint.uid == 0:
-                            continue
-                        # only update frames with new calibration id
-                        if current_window[cam_idx] < self.calibration_keyframe_idx:
-                            continue
-                        update_pose(viewpoint)
-                else:
-                    # original pose update in GS-SLAM
-                    for cam_idx in range(min(frames_to_optimize, len(current_window))):
-                        viewpoint = viewpoint_stack[cam_idx]
-                        if viewpoint.uid == 0:
-                            continue
-                        update_pose(viewpoint)
+                if not self.use_gt_pose:
+                    if (not self.calibration_initialized) and calibrate==-1: # calibration with one view
+                        for cam_idx in range( len(current_window) ):
+                            viewpoint = viewpoint_stack[cam_idx]
+                            if viewpoint.uid == 0:
+                                continue
+                            # only update frames with new calibration id
+                            if current_window[cam_idx] < self.calibration_keyframe_idx:
+                                continue
+                            update_pose(viewpoint)
+                    else:
+                        # original pose update in GS-SLAM
+                        for cam_idx in range(min(frames_to_optimize, len(current_window))):
+                            viewpoint = viewpoint_stack[cam_idx]
+                            if viewpoint.uid == 0:
+                                continue
+                            update_pose(viewpoint)
 
 
                 # Structure (3D Gaussian) update

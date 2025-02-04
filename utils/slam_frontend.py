@@ -63,6 +63,9 @@ class FrontEnd(mp.Process):
         self.calibration_keyframe_sent = True
         self.calibration_initialized = True
 
+        # use ground-truth poses for reconstruction, in which case poses will not be optimised
+        self.use_gt_pose = config.get("use_gt_pose", False)
+
         # ATE array
         self.ATE_records = []
 
@@ -151,6 +154,20 @@ class FrontEnd(mp.Process):
 
     def tracking(self, cur_frame_idx, viewpoint, focal_optimizer_type=None, learning_rate=0.001, grad_mask=True):
 
+        # set to the ground truth pose
+        if self.use_gt_pose:
+            viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt)  # use provided ground-truth pose
+            render_pkg = render(
+                viewpoint, self.gaussians, self.pipeline_params, self.background
+            )
+            image, depth, opacity = (
+                render_pkg["render"],
+                render_pkg["depth"],
+                render_pkg["opacity"],
+            )
+            self.median_depth = get_median_depth(depth, opacity)
+            return render_pkg
+        
         # add calibration optimizer in tracking
         calibration_optimizers = None
         if focal_optimizer_type is not None:
