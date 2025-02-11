@@ -264,8 +264,40 @@ class SLAM_Dataset_Simulator:
 
 
 
+def run_tum_gt_pose():
 
-def main1():
+    tum_configs = {}
+    if True:
+        tum_configs[1] = glob.glob(f"configs/mono/tum/fr1_desk.yaml")
+        tum_configs[2] = glob.glob(f"configs/mono/tum/fr2_xyz.yaml")
+        tum_configs[3] = glob.glob(f"configs/mono/tum/fr3_office.yaml")
+    print(tum_configs)
+
+    for _, configs in tum_configs.items():
+
+        for config_file_path in configs:
+            torch.cuda.empty_cache()
+            command = f"python slam.py --config {config_file_path} --use_gt_pose --eval"
+            print(f"Running: {command}")
+            os.system(command)
+
+    if os.path.exists("results/tum/fr1_desk_save"):
+        os.system("rm -rf results/tum/fr1_desk_save")
+    os.system("mv results/tum/fr1_desk results/tum/fr1_desk_save")
+
+    if os.path.exists("results/tum/fr2_xyz_save"):
+        os.system("rm -rf results/tum/fr2_xyz_save")
+    os.system("mv results/tum/fr2_xyz results/tum/fr2_xyz_save")
+
+    if os.path.exists("results/tum/fr3_office_save"):
+        os.system("rm -rf results/tum/fr3_office_save")
+    os.system("mv results/tum/fr3_office results/tum/fr3_office_save")
+
+
+
+
+
+def main_tum_fr1():
 
     config_file = "configs/mono/tum/fr1_desk.yaml"
     result_path = "results/tum/fr1_desk_save"
@@ -275,9 +307,9 @@ def main1():
     """
     set calibration changes
     """
-    sim.set_calibration(idx=100, fx=500, kappa=0.0)
-    sim.set_calibration(idx=200, fx=560, kappa=0.0)
-    sim.set_calibration(idx=300, fx=500, kappa=0.0)
+    # sim.set_calibration(idx=100, fx=500, kappa=0.0)
+    # sim.set_calibration(idx=200, fx=560, kappa=0.0)
+    # sim.set_calibration(idx=300, fx=500, kappa=0.0)
 
 
     new_config_filename = "configs/mono/tum/fr1_desk_calib0.yaml"
@@ -287,7 +319,7 @@ def main1():
 
 
 
-def main2():
+def main_tum_fr2():
 
     config_file = "configs/mono/tum/fr2_xyz.yaml"
     result_path = "results/tum/fr2_xyz_save"
@@ -297,9 +329,9 @@ def main2():
     """
     set calibration changes
     """
-    sim.set_calibration(idx=100, fx=500, kappa=0.0)
-    sim.set_calibration(idx=200, fx=560, kappa=0.0)
-    sim.set_calibration(idx=300, fx=500, kappa=0.0)
+    # sim.set_calibration(idx=100, fx=500, kappa=0.0)
+    # sim.set_calibration(idx=200, fx=560, kappa=0.0)
+    # sim.set_calibration(idx=300, fx=500, kappa=0.0)
 
 
     new_config_filename = "configs/mono/tum/fr2_xyz_calib0.yaml"
@@ -308,7 +340,8 @@ def main2():
     sim.run(new_config_filename, output_data_dir)
 
 
-def main3():
+
+def main_tum_fr3():
 
     config_file = "configs/mono/tum/fr3_office.yaml"
     result_path = "results/tum/fr3_office_save"
@@ -318,9 +351,9 @@ def main3():
     """
     set calibration changes
     """
-    sim.set_calibration(idx=100, fx=500, kappa=0.0)
-    sim.set_calibration(idx=200, fx=560, kappa=0.0)
-    sim.set_calibration(idx=300, fx=500, kappa=0.0)
+    # sim.set_calibration(idx=100, fx=500, kappa=0.0)
+    # sim.set_calibration(idx=200, fx=560, kappa=0.0)
+    # sim.set_calibration(idx=300, fx=500, kappa=0.0)
 
 
     new_config_filename = "configs/mono/tum/fr3_office_calib0.yaml"
@@ -331,8 +364,11 @@ def main3():
 
 
 
+
 if __name__ == "__main__":
-    main1()
-    main2()
-    main3()
+    run_tum_gt_pose()
+
+    main_tum_fr1()
+    main_tum_fr2()
+    main_tum_fr3()
 

@@ -257,7 +257,7 @@ class BackEnd(mp.Process):
 
             scaling = self.gaussians.get_scaling
             isotropic_loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1))
-            loss_mapping += 10 * isotropic_loss.mean() if (not fix_gaussian) else 0
+            loss_mapping += 10 * isotropic_loss.mean() # if (not self.use_gt_pose) else 0
             # loss_mapping += 0.01*self.gaussians.get_opacity.mean() if calibrate else 0 #  # loss to enhance sparsity
             loss_mapping.backward()
             gaussian_split = False
@@ -454,7 +454,7 @@ class BackEnd(mp.Process):
     def color_refinement(self):
         Log("Starting color refinement")
 
-        iteration_total = 26000
+        iteration_total = 26000 if not self.use_gt_pose else 260000
         for iteration in tqdm(range(1, iteration_total + 1)):
             viewpoint_idx_stack = list(self.viewpoints.keys())
             viewpoint_cam_idx = viewpoint_idx_stack.pop(

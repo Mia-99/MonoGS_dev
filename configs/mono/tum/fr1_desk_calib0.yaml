@@ -20,9 +20,9 @@ Dataset:
   SelfCalibration:
     enabled: true
     radial_distortion: 1
-    frame_id: 100, 200, 300
-    gt_fx: 500, 560, 500
-    gt_kappa: 0.0, 0.0, 0.0
+    frame_id: ''
+    gt_fx: ''
+    gt_kappa: ''
     backend_params:
       lr_cnt1: 0.002
       lr_cnt2: 0.0002

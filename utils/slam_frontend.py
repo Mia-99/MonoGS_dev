@@ -185,7 +185,7 @@ class FrontEnd(mp.Process):
         # print(f"prev = {prev.uid},   viewpoint = {viewpoint.uid}")
 
         lr_scale_factor = 1.0 if calibration_optimizers is not None else 1.0
-        tracking_itr_num = self.tracking_itr_num * 1 if calibration_optimizers is not None else self.tracking_itr_num
+        tracking_itr_num = self.tracking_itr_num * 2 if calibration_optimizers is not None else self.tracking_itr_num
 
         opt_params = []
         opt_params.append(
