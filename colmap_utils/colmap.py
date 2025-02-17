@@ -218,7 +218,17 @@ class ColMap:
     def __set_to_single_camera(self, focal = None, kappa = None, delta_focal = None):        
         # set all cameras to the same camera
         for image_id, image in self.reconstruction.images.items():
-            image.camera_id = self.single_cam_id
+            print(f"{image.camera_id=}, {type(image.camera_id)=}")
+
+            print(image.has_camera_id())
+            print(image.has_camera_ptr())
+
+            print(image.reset_camera_ptr())
+
+            print(image.has_camera_id())
+            print(image.has_camera_ptr())
+
+            image.camera_id = int(self.single_cam_id)
         
         if focal is not None:
             self.reconstruction.cameras[ self.single_cam_id ].params[0] = focal

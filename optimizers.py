@@ -103,7 +103,7 @@ class CalibrationOptimizer:
         else:
             raise TypeError("Only SGD and Adam are supported for focal length optimization!")
         
-        self.kappa_optimizer = torch.optim.SGD(kappa_opt_params)
+        self.kappa_optimizer = torch.optim.Adam(kappa_opt_params)
 
 
 
@@ -163,10 +163,10 @@ class CalibrationOptimizer:
         for cam_calib_id, cam_stack in self.calibration_groups.items():
             if cam_calib_id == calib_id:
                 kappa_delta = self.kappa_delta_groups [ cam_calib_id ].data.cpu().numpy()[0]
-                kappa_grad  = self.kappa_delta_groups [ cam_calib_id ].grad.cpu().numpy()[0]
-                # print(f">>opt_kappa={kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
+                kappa_grad  = self.kappa_delta_groups [ cam_calib_id ].grad.cpu().numpy()[0]                
                 for viewpoint_cam in cam_stack:
                     viewpoint_cam.kappa += kappa_delta
+                    print(f">> uid: [{viewpoint_cam.uid}], opt_kappa={viewpoint_cam.kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
                 return kappa_grad
 
     
@@ -231,10 +231,10 @@ class CalibrationOptimizer:
             viewpoint_cam.cam_focal_delta.data.fill_(0)
             viewpoint_cam.cam_kappa_delta.data.fill_(0)
             if viewpoint_cam.cam_focal_delta.grad is not None:
-                # viewpoint_cam.cam_focal_delta.grad.detach_()
+                viewpoint_cam.cam_focal_delta.grad.detach_()
                 viewpoint_cam.cam_focal_delta.grad.fill_(0)
             if viewpoint_cam.cam_kappa_delta.grad is not None:
-                # viewpoint_cam.cam_kappa_delta.grad.detach_()
+                viewpoint_cam.cam_kappa_delta.grad.detach_()
                 viewpoint_cam.cam_kappa_delta.grad.fill_(0)
 
 

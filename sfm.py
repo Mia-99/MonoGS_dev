@@ -10,6 +10,7 @@ import wandb
 from random import randint
 import numpy as np
 import copy
+import random
 
 import torch
 import torch.multiprocessing as mp
@@ -59,6 +60,18 @@ except ImportError:
 
 
 
+
+def print_viewpoint_stack(viewpoint_stack, prefix="Camera"):
+    for viewpoint_cam in viewpoint_stack:
+        uid = viewpoint_cam.uid
+        calib_id = viewpoint_cam.calib_id
+        fx = viewpoint_cam.fx
+        fy = viewpoint_cam.fy
+        kappa = viewpoint_cam.kappa     
+        CC = viewpoint_cam.camera_center.cpu().numpy()
+        exposure_a = viewpoint_cam.exposure_a.data.item()
+        exposure_b = viewpoint_cam.exposure_b.data.item()
+        rich.print(f"[bold blue]{prefix}[/bold blue] uid: [{uid}]: calib_id: {calib_id}. fx: {fx:.3f}, fy: {fy:.3f}, kappa: {kappa:.6f}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f})")
 
 
 
@@ -327,8 +340,14 @@ class SFM(mp.Process):
 
             # calibration step
             if update_calibration:
+                
+                for viewpoint in self.viewpoint_stack:
+                    rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
                 self.calibration_optimizer.focal_step()
+
                 if self.allow_lens_distortion:
+                    for viewpoint in self.viewpoint_stack:
+                        rich.print(f"[bold red]After loss.backward: [/bold red]{viewpoint.cam_kappa_delta.grad=}")
                     self.calibration_optimizer.kappa_step()
             
             # pose step
@@ -343,7 +362,9 @@ class SFM(mp.Process):
             self.pose_optimizer.zero_grad() # clear gradient every iteration
             self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
 
-
+            for viewpoint in self.viewpoint_stack:
+                print(f"After zero_grad: {viewpoint.cam_kappa_delta.data=}")
+                print(f"After zero_grad: {viewpoint.cam_kappa_delta.grad=}")
 
     def run_phase1 (self, max_iters = 500):
         '''
@@ -361,6 +382,7 @@ class SFM(mp.Process):
                                            densify_prune = densify_prune,
                                            reset_opacity = reset_opacity
                                            )
+            # print_viewpoint_stack(self.viewpoint_stack, prefix="Camera")
             if self.use_gui and (iteration % 5 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
@@ -390,6 +412,7 @@ class SFM(mp.Process):
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
+            print_viewpoint_stack(self.viewpoint_stack, prefix="Camera")
             if self.use_gui and (iteration % 5 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
@@ -739,9 +762,6 @@ class SFM(mp.Process):
 
 
 
-
-
-
 if __name__ == "__main__":
 
     mp.set_start_method('spawn')
@@ -794,14 +814,19 @@ if __name__ == "__main__":
     cameras_extent = scene.cameras_extent
 
 
-    N = 3
+    N = 10
 
     viewpoint_stack = scene.getTrainCameras()
-    while len(viewpoint_stack) > N:
-        viewpoint_stack.pop(-1)
-    sfm_gui.Log(f"cameras used: {len(scene.getTrainCameras())}")
 
-    viewpoint_stack = scene.getTrainCameras().copy()
+    for idx, viewpoint in enumerate(viewpoint_stack):
+        viewpoint.uid = idx
+    # print_viewpoint_stack(viewpoint_stack)
+
+    ids = [ random.randint(0, len(viewpoint_stack)-1)  for i in range(N) ]
+    ids.sort()
+
+    filtered_viewpoint_stack = [ viewpoint_stack[id] for id in ids ]
+    viewpoint_stack = filtered_viewpoint_stack
 
     # in original 3DGS, R is transposed in colmap reader and later inverted in getWorld2View2
     # in this code, getWorld2View2 don't transpose R
@@ -809,52 +834,23 @@ if __name__ == "__main__":
         Rt = torch.transpose(cam.R, 0, 1)
         cam.R = Rt
 
-
+    print_viewpoint_stack(viewpoint_stack)
 
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
+    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
+    
 
     ## visualization
     use_gui = True
-    q_main2vis = mp.Queue() if use_gui else FakeQueue()
-    q_vis2main = mp.Queue() if use_gui else FakeQueue()
+    sfm = SFM(pipe=pipe, use_gui=use_gui, viewpoint_stack=viewpoint_stack, gaussians=gaussians, opt=opt, cameras_extent=cameras_extent)
+    sfm.require_calibration = True
+    sfm.allow_lens_distortion = True
 
+    sfm.optimize(phase1_iter = 0, phase3_iter = 0, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 10, phase2_CaliDBA_GSS_iter = 0, set_focal_error=0)
 
-    if use_gui:
-        bg_color = [0.0, 0.0, 0.0]
-        params_gui = gui_utils.ParamsGUI(
-            pipe=pipe,
-            background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
-            gaussians=GaussianModel(dataset.sh_degree),
-            q_main2vis=q_main2vis,
-            q_vis2main=q_vis2main,
-        )
-        gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
-        gui_process.start()
-        time.sleep(1)
+    # sfm.optimize(phase1_iter = 0, phase3_iter = 0, phase2_DBA_iter = 0, phase2_CaliDBA_iter = 10, phase2_CaliDBA_GSS_iter = 0, set_focal_error=0)
 
+    (W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images, error_images) = sfm.eval_data()
 
-    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
-
-    sfm = SFM(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
-
-    sfm.MODULE_TEST_CALIBRATION = True
-    sfm.add_calib_noise_iter = 50
-    sfm.start_calib_iter = 50
-
-    sfm_process = mp.Process(target=sfm.optimize)
-    sfm_process.start()
-
-  
-    torch.cuda.synchronize()
-
-
-    if use_gui:
-        gui_process.join()
-        sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
-
-
-
-    sfm_process.join()
-    sfm_gui.Log("Finished", tag="SfM")
