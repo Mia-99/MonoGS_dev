@@ -188,23 +188,18 @@ class CameraResectioning(mp.Process):
         # Loss
         gt_image = viewpoint.original_image.cuda() 
         mask = (gt_image.sum(dim=0) > self.rgb_boundary_threshold)
-        # mask = opacity
-        # Ll1 = l1_loss(image, gt_image)
+        # mask = mask * opacity
 
         # Gaussian scale space for focal length calibration
         if use_scale_space and self.gaussian_scale_t > 0.5:
-            image_scale_t = image_conv_gaussian_separable(image, sigma=self.gaussian_scale_t, epsilon=0.01) * mask
-            gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=self.gaussian_scale_t, epsilon=0.01) * mask
+            image_scale_t = image_conv_gaussian_separable(image, sigma=self.gaussian_scale_t, epsilon=0.01)
+            gt_image_scale_t = image_conv_gaussian_separable(gt_image, sigma=self.gaussian_scale_t, epsilon=0.01)
         else:
-            image_scale_t = image #* mask
-            gt_image_scale_t = gt_image #* mask
+            image_scale_t = image
+            gt_image_scale_t = gt_image
 
-        # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
-        huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 0.0)
-        loss += (1.0 - self.opt.lambda_dssim) * huber_loss_function(image_scale_t, gt_image_scale_t)
-
-        # Ll1 = l1_loss(image*mask, gt_image*mask)  
-        # loss += (1.0 - self.opt.lambda_dssim) * Ll1
+        Ll1 = l1_loss(image_scale_t*mask, gt_image_scale_t*mask)
+        loss += (1.0 - self.opt.lambda_dssim) * Ll1
 
         # enable SSIM loss when a good intialial reconstruction is attained
         if use_SSIM:
@@ -212,6 +207,7 @@ class CameraResectioning(mp.Process):
 
         return loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched
     
+ 
     
 
     def optimize_one_step (self, iteration, update_Gaussian = False, update_pose = False, update_calibration = False,  use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
