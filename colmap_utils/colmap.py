@@ -76,13 +76,15 @@ class ColMap:
         self.reconstruction = maps[0]
         # print(self.reconstruction.summary())
 
-        # use single camera intrinsic calibration for all images
-        self.__set_to_single_camera()
-        '''
-        bundle_adjustment
-        https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.bundle_adjustment
-        '''
-        pycolmap.bundle_adjustment(self.reconstruction)
+        if False:
+            # use single camera intrinsic calibration for all images
+            self.__set_to_single_camera()
+            '''
+            bundle_adjustment
+            https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.bundle_adjustment
+            '''
+            pycolmap.bundle_adjustment(self.reconstruction)
+
         print(self.reconstruction.summary())
 
         # save
@@ -241,31 +243,6 @@ class ColMap:
 
         return self.single_cam_id
 
-
-
-def read_groundtruth_camera(ground_truth_camera_file):    
-    with open(ground_truth_camera_file, 'r') as f:
-        lines = f.readlines()
-    lst = []
-    for line in lines:
-        arr = np.fromstring(line, sep=' ')
-        lst.append(arr)
-
-    K = np.array(lst[0:3])
-    # print(f"K = \n{K}")
-
-    R = np.array(lst[4:7])
-    T = lst[7]
-
-    pose = np.eye(4)
-    pose[0:3, 0:3] = R
-    pose[0:3, 3] = T
-    # print(f"pose = \n {pose}\n")
-
-    img_size = lst[8]
-    width, height = int(img_size[0]), int(img_size[1])
-
-    return (K, pose, width, height)
 
 
 

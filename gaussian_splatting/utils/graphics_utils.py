@@ -24,16 +24,24 @@ class BasicPointCloud(NamedTuple):
 
 def getWorld2View(R, t):
     Rt = np.zeros((4, 4))
+    Rt[:3, :3] = R
+    Rt[:3, 3] = t
+    Rt[3, 3] = 1.0
+    return np.float32(Rt)
+
+
+def getWorld2View_GS(R, t):
+    Rt = np.zeros((4, 4))
     Rt[:3, :3] = R.transpose()
     Rt[:3, 3] = t
     Rt[3, 3] = 1.0
     return np.float32(Rt)
 
+
 # Mono-GS
 def getWorld2View2(R, t, translate=torch.tensor([0.0, 0.0, 0.0]), scale=1.0):
     translate = translate.to(R.device)
     Rt = torch.zeros((4, 4), device=R.device)
-    # Rt[:3, :3] = R.transpose()
     Rt[:3, :3] = R
     Rt[:3, 3] = t
     Rt[3, 3] = 1.0
@@ -45,10 +53,10 @@ def getWorld2View2(R, t, translate=torch.tensor([0.0, 0.0, 0.0]), scale=1.0):
     Rt = torch.linalg.inv(C2W)
     return Rt
 
-# GS original
+# GS original. not used anymore
 def getWorld2View2_GS(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
     Rt = np.zeros((4, 4))
-    Rt[:3, :3] = R.transpose()
+    Rt[:3, :3] = R.transpose()  # R is stored transposed due to 'glm' in CUDA code
     Rt[:3, 3] = t
     Rt[3, 3] = 1.0
 

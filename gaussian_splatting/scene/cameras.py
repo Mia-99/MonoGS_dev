@@ -12,7 +12,7 @@
 import torch
 from torch import nn
 import numpy as np
-from gaussian_splatting.utils.graphics_utils import getWorld2View2, getProjectionMatrix2, getProjectionMatrix, fov2focal, focal2fov, getWorld2View2_GS
+from gaussian_splatting.utils.graphics_utils import getWorld2View2, getProjectionMatrix2, getProjectionMatrix, fov2focal, focal2fov
 
 from utils.pose_utils import SO3_exp
 

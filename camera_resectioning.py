@@ -28,6 +28,7 @@ from gaussian_splatting.utils.graphics_utils import BasicPointCloud
 from gaussian_splatting.utils.general_utils import helper as lr_helper
 
 
+from utils.camera_utils import Camera
 from utils.pose_utils import update_pose
 
 
@@ -43,6 +44,7 @@ from matplotlib import pyplot as plt
 
 import pathlib
 import rich
+import json
 
 from gaussian_viewer import Viewer, create_gaussians_gl
 
@@ -388,6 +390,7 @@ class CameraResectioning(mp.Process):
 
 
 
+
 def main():
 
     camera_file_path = "/hdd/3DGS/bicycle/cameras.json"
@@ -406,110 +409,103 @@ if __name__ == "__main__":
     mp.set_start_method('spawn')
 
 
-    # Set up command line argument parser
-    parser = ArgumentParser(description="Training script parameters")
-    lp = ModelParams(parser)
-    op = OptimizationParams(parser)
-    pp = PipelineParams(parser)
-    parser.add_argument('--ip', type=str, default="127.0.0.1")
-    parser.add_argument('--port', type=int, default=6009)
-    parser.add_argument('--debug_from', type=int, default=-1)
-    parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
-    parser.add_argument("--start_checkpoint", type=str, default = None)
-    args = parser.parse_args(sys.argv[1:])
-    args.save_iterations.append(args.iterations)
+    # # Set up command line argument parser
+    # parser = ArgumentParser(description="Training script parameters")
+    # lp = ModelParams(parser)
+    # op = OptimizationParams(parser)
+    # pp = PipelineParams(parser)
+    # parser.add_argument('--ip', type=str, default="127.0.0.1")
+    # parser.add_argument('--port', type=int, default=6009)
+    # parser.add_argument('--debug_from', type=int, default=-1)
+    # parser.add_argument('--detect_anomaly', action='store_true', default=False)
+    # parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    # parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    # parser.add_argument("--quiet", action="store_true")
+    # parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
+    # parser.add_argument("--start_checkpoint", type=str, default = None)
+    # args = parser.parse_args(sys.argv[1:])
+    # args.save_iterations.append(args.iterations)
     
-    print("Optimizing " + args.model_path)
+    # print("Optimizing " + args.model_path)
 
-    # Initialize system state (RNG)
-    safe_state(args.quiet)
-
-
-    dataset = lp.extract(args)
-    opt = op.extract(args)
-    pipe = pp.extract(args)
+    # # Initialize system state (RNG)
+    # safe_state(args.quiet)
 
 
-
-    opt.iterations = 200
-    opt.densification_interval = 50
-    opt.opacity_reset_interval = 350
-    opt.densify_from_iter = 49
-    opt.densify_until_iter = 750
-    opt.densify_grad_threshold = 0.0002
+    # dataset = lp.extract(args)
+    # opt = op.extract(args)
+    # pipe = pp.extract(args)
 
 
 
-    gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
-    cameras_extent = scene.cameras_extent
-
-
-    N = 3
-
-    viewpoint_stack = scene.getTrainCameras()
-    while len(viewpoint_stack) > N:
-        viewpoint_stack.pop(-1)
-    sfm_gui.Log(f"cameras used: {len(scene.getTrainCameras())}")
-
-    viewpoint_stack = scene.getTrainCameras().copy()
-
-    # in original 3DGS, R is transposed in colmap reader and later inverted in getWorld2View2
-    # in this code, getWorld2View2 don't transpose R
-    for cam in viewpoint_stack:
-        Rt = torch.transpose(cam.R, 0, 1)
-        cam.R = Rt
+    # opt.iterations = 200
+    # opt.densification_interval = 50
+    # opt.opacity_reset_interval = 350
+    # opt.densify_from_iter = 49
+    # opt.densify_until_iter = 750
+    # opt.densify_grad_threshold = 0.0002
 
 
 
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
+    # gaussians = GaussianModel(dataset.sh_degree)
+    # scene = Scene(dataset, gaussians)
+    # cameras_extent = scene.cameras_extent
+
+
+    # N = 3
+
+    # viewpoint_stack = scene.getTrainCameras()
+    # while len(viewpoint_stack) > N:
+    #     viewpoint_stack.pop(-1)
+    # sfm_gui.Log(f"cameras used: {len(scene.getTrainCameras())}")
+
+    # viewpoint_stack = scene.getTrainCameras().copy()
+
+
+    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
 
 
-    ## visualization
-    use_gui = False
-    q_main2vis = mp.Queue() if use_gui else FakeQueue()
-    q_vis2main = mp.Queue() if use_gui else FakeQueue()
+    # ## visualization
+    # use_gui = False
+    # q_main2vis = mp.Queue() if use_gui else FakeQueue()
+    # q_vis2main = mp.Queue() if use_gui else FakeQueue()
 
 
-    if use_gui:
-        bg_color = [0.0, 0.0, 0.0]
-        params_gui = gui_utils.ParamsGUI(
-            pipe=pipe,
-            background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
-            gaussians=GaussianModel(dataset.sh_degree),
-            q_main2vis=q_main2vis,
-            q_vis2main=q_vis2main,
-        )
-        gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
-        gui_process.start()
-        time.sleep(1)
+    # if use_gui:
+    #     bg_color = [0.0, 0.0, 0.0]
+    #     params_gui = gui_utils.ParamsGUI(
+    #         pipe=pipe,
+    #         background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
+    #         gaussians=GaussianModel(dataset.sh_degree),
+    #         q_main2vis=q_main2vis,
+    #         q_vis2main=q_vis2main,
+    #     )
+    #     gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
+    #     gui_process.start()
+    #     time.sleep(1)
 
 
-    print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
+    # print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
 
-    sfm = CameraResectioning(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
+    # sfm = CameraResectioning(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
 
-    sfm.MODULE_TEST_CALIBRATION = True
-    sfm.add_calib_noise_iter = 50
-    sfm.start_calib_iter = 50
+    # sfm.MODULE_TEST_CALIBRATION = True
+    # sfm.add_calib_noise_iter = 50
+    # sfm.start_calib_iter = 50
 
-    sfm_process = mp.Process(target=sfm.optimize)
-    sfm_process.start()
+    # sfm_process = mp.Process(target=sfm.optimize)
+    # sfm_process.start()
 
   
-    torch.cuda.synchronize()
+    # torch.cuda.synchronize()
 
 
-    if use_gui:
-        gui_process.join()
-        sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
+    # if use_gui:
+    #     gui_process.join()
+    #     sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
 
 
 
-    sfm_process.join()
-    sfm_gui.Log("Finished", tag="SfM")
+    # sfm_process.join()
+    # sfm_gui.Log("Finished", tag="SfM")

@@ -819,15 +819,11 @@ if __name__ == "__main__":
 
     ids = [ random.randint(0, len(viewpoint_stack)-1)  for i in range(N) ]
     ids.sort()
+    ids = [ 11, 41, 51, 93, 101, 140, 143, 154, 203, 243 ]
 
     filtered_viewpoint_stack = [ viewpoint_stack[id] for id in ids ]
     viewpoint_stack = filtered_viewpoint_stack
 
-    # in original 3DGS, R is transposed in colmap reader and later inverted in getWorld2View2
-    # in this code, getWorld2View2 don't transpose R
-    for cam in viewpoint_stack:
-        Rt = torch.transpose(cam.R, 0, 1)
-        cam.R = Rt
 
     print_viewpoint_stack(viewpoint_stack)
 

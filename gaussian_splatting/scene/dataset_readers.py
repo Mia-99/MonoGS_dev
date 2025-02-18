@@ -15,7 +15,7 @@ from PIL import Image
 from typing import NamedTuple
 from gaussian_splatting.scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
-from gaussian_splatting.utils.graphics_utils import getWorld2View2, focal2fov, fov2focal, getWorld2View2_GS
+from gaussian_splatting.utils.graphics_utils import getWorld2View2, focal2fov, fov2focal, getWorld2View
 import numpy as np
 import json
 from pathlib import Path
@@ -58,7 +58,7 @@ def getNerfppNorm(cam_info):
     cam_centers = []
 
     for cam in cam_info:
-        W2C = getWorld2View2_GS(cam.R, cam.T)
+        W2C = getWorld2View(cam.R, cam.T)
         C2W = np.linalg.inv(W2C)
         cam_centers.append(C2W[:3, 3:4])
 
@@ -68,6 +68,9 @@ def getNerfppNorm(cam_info):
     translate = -center
 
     return {"translate": translate, "radius": radius}
+
+
+
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     cam_infos = []
@@ -84,7 +87,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         # print(f"intr = {intr}")
 
         uid = intr.id
-        R = np.transpose(qvec2rotmat(extr.qvec))
+        # R = np.transpose(qvec2rotmat(extr.qvec))  # R is stored transposed due to 'glm' in CUDA code
+        R = qvec2rotmat(extr.qvec)  # Do not transpose in new CUDA code
         T = np.array(extr.tvec)
 
         if intr.model=="SIMPLE_PINHOLE":
@@ -204,7 +208,8 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
 
             # get the world-to-camera transform and set R, T
             w2c = np.linalg.inv(c2w)
-            R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+            # R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+            R = w2c[:3,:3]  # Do not transpose in new CUDA code
             T = w2c[:3, 3]
 
             image_path = os.path.join(path, cam_name)
