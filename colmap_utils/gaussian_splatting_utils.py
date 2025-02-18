@@ -85,76 +85,6 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_cal
 
 
 
-# def assemble_3DGS_cameras_from_json_file (camera_json_file):
-#     """
-#     {"id": 0, "img_name": "IMG_6292", "width": 1332, "height": 876, "position": [-1.4759880629577484, 1.6090724813669521, -2.7727036587765035], "rotation": [[0.5408209248789425, -0.8404510054983934, -0.03398285699915072], [0.003746154845639685, 0.042807333797130434, -0.999076322658611], [0.8411294154510098, 0.540194075800467, 0.026299561462536303]], "fy": 1034.9718637370904, "fx": 1035.4965990500061}
-#     """
-#     camera_stack = []
-#     camera_centers = []
-
-#     with open(camera_json_file, 'r') as json_file:
-#         contents = json.load(json_file)
-
-
-#     for cam_info in contents:
-#         uid = cam_info["id"]
-#         img_name = cam_info["img_name"]
-#         W = cam_info["width"]
-#         H = cam_info["height"]
-#         T = cam_info["position"]
-#         R = cam_info["rotation"]
-#         fx = cam_info["fx"]
-#         fy = cam_info["fy"]
-
-#         cx = (W+1)*0.5
-#         cy = (H+1)*0.5
-
-#         gt_image =None
-
-#         # get the world-to-camera transform and set R, T
-#         R = np.array(R)
-#         T = np.array(T)
-
-#         W2C_R = np.transpose(R)
-#         W2C_T = - np.transpose(R) @ T
-
-#         cam = Camera (
-#                     uid = uid,
-#                     color = gt_image,
-#                     depth = None,
-#                     image_height = H,
-#                     image_width = W,
-#                     R = W2C_R, T = W2C_T,
-#                     fx = fx,
-#                     fy = fy,
-#                     cx = cx,
-#                     cy = cy,
-#                     fovx = None,
-#                     fovy = None,
-#                     kappa = kappa,
-#                     trans=np.array([0.0, 0.0, 0.0]),
-#                     scale=1.0,
-#                     gt_alpha_mask = None,
-#                     device="cuda:0",
-#         )
-#         camera_stack.append(cam)
-#         camera_centers.append( - W2C_R.transpose() @ W2C_T.reshape((3, 1)) ) # camera center
-#     # getNerfppNorm copied from 3DGS original implementation
-#     def get_center_and_diag(cam_centers):
-#         cam_centers = np.hstack(cam_centers)
-#         avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
-#         center = avg_cam_center
-#         dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
-#         diagonal = np.max(dist)
-#         return center.flatten(), diagonal
-#     center, diagonal = get_center_and_diag(camera_centers)
-#     radius = diagonal * 1.1
-#     translate = -center
-#     return camera_stack, {"translate": translate, "radius": radius}
-
-
-
-
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     camera_stack = []
     camera_centers = []
@@ -222,37 +152,59 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 
 
 def assemble_3DGS_cameras_from_binary_file (camera_bin_file):
+    pass
+
+
+
+
+
+def assemble_3DGS_cameras_from_3DGS_JSON_file (camera_json_file):
     """
-    {"id": 0, "img_name": "IMG_6292", "width": 1332, "height": 876, "position": [-1.4759880629577484, 1.6090724813669521, -2.7727036587765035], "rotation": [[0.5408209248789425, -0.8404510054983934, -0.03398285699915072], [0.003746154845639685, 0.042807333797130434, -0.999076322658611], [0.8411294154510098, 0.540194075800467, 0.026299561462536303]], "fy": 1034.9718637370904, "fx": 1035.4965990500061}
+    There is no image in the assembled Camera class
+
+    refer to:
+        gaussian_splatting/utils/camera_utils.py
+        def camera_to_JSON(id, camera : Camera)
+        -----------------------------------------------------
+                    C2W = np.linalg.inv(Rt)
+                    pos = C2W[:3, 3]
+                    rot = C2W[:3, :3]
+
+                    camera_entry = {
+                        'id' : id,
+                        'img_name' : camera.image_name,
+                        'width' : camera.width,
+                        'height' : camera.height,
+                        'position': pos.tolist(),
+                        'rotation': serializable_array_2d,
+                        'fy' : fov2focal(camera.FovY, camera.height),
+                        'fx' : fov2focal(camera.FovX, camera.width)
+                    }
     """
     camera_stack = []
-    camera_centers = []
 
-    with open(camera_bin_file, 'r') as json_file:
+    with open(camera_json_file, 'r') as json_file:
         contents = json.load(json_file)
-
 
     for cam_info in contents:
         uid = cam_info["id"]
         img_name = cam_info["img_name"]
         W = cam_info["width"]
         H = cam_info["height"]
-        T = cam_info["position"]
-        R = cam_info["rotation"]
+        pos = np.array ( cam_info["position"] )
+        rot = np.array ( cam_info["rotation"] )
         fx = cam_info["fx"]
         fy = cam_info["fy"]
 
         cx = (W+1)*0.5
         cy = (H+1)*0.5
+        kappa = 0.0
 
-        gt_image =None
+        gt_image = None
 
         # get the world-to-camera transform and set R, T
-        R = np.array(R)
-        T = np.array(T)
-
-        W2C_R = np.transpose(R)
-        W2C_T = - np.transpose(R) @ T
+        W2C_R = np.transpose(rot)
+        W2C_T = - np.transpose(rot) @ pos
 
         cam = Camera (
                     uid = uid,
@@ -274,23 +226,7 @@ def assemble_3DGS_cameras_from_binary_file (camera_bin_file):
                     device="cuda:0",
         )
         camera_stack.append(cam)
-        camera_centers.append( - W2C_R.transpose() @ W2C_T.reshape((3, 1)) ) # camera center
-    # getNerfppNorm copied from 3DGS original implementation
-    def get_center_and_diag(cam_centers):
-        cam_centers = np.hstack(cam_centers)
-        avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
-        center = avg_cam_center
-        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
-        diagonal = np.max(dist)
-        return center.flatten(), diagonal
-    center, diagonal = get_center_and_diag(camera_centers)
-    radius = diagonal * 1.1
-    translate = -center
-    return camera_stack, {"translate": translate, "radius": radius}
-
-
-
-
+    return camera_stack
 
 
 
@@ -342,10 +278,6 @@ if __name__ == "__main__":
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction)
 
     sparse_depth_stack = reconstruction.getSparseDepthFromImage(image_id = 1)
-
-    # camera_json_file = 
-
-    # viewpoint_stack, scale_info = assemble_3DGS_cameras_from_json(camera_json_file)
 
 
     try:

@@ -49,6 +49,10 @@ import json
 from gaussian_viewer import Viewer, create_gaussians_gl
 
 
+from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras_from_3DGS_JSON_file
+
+
+
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -73,16 +77,19 @@ def print_viewpoint_stack(viewpoint_stack, prefix="Camera"):
 
 
 
+
 class CameraResectioning(mp.Process):
 
 
-    def __init__(self, pipe = None, use_gui = True, viewpoint_stack = None, gaussians = None, opt = None, cameras_extent = None) -> None:
+    def __init__(self, pipe = None, use_gui = True, viewpoint_stack = None, gaussians = None, opt = None) -> None:
         self.pipe = pipe
         self.use_gui = use_gui
 
         self.viewpoint_stack = viewpoint_stack   # list of cameras
         self.gaussians = gaussians   # fixed in camera resectioning
         self.opt = opt
+
+        self.gaussians.optimizer = None # Do NOT optimize Gaussian
 
         self.background = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device="cuda")
         self.rgb_boundary_threshold = 0.01
@@ -94,8 +101,6 @@ class CameraResectioning(mp.Process):
         self.allow_lens_distortion = True
 
         self.focal_reference = None
-
-        self.cameras_extent = cameras_extent
 
         self.calibration_optimizer = None
         self.pose_optimizer = None
@@ -127,8 +132,129 @@ class CameraResectioning(mp.Process):
 
 
 
+    def set_viewpoint_calibration (self, view_id=0, delta_focal=0.0, delta_kappa=0.0):
+        assert ( view_id >= 0 and view_id < len(self.viewpoint_stack) ), f"view_id={view_id} out of range!"
+        viewpoint = self.viewpoint_stack[view_id]
+
+        focal = viewpoint.fx + delta_focal
+        kappa = viewpoint.kappa + delta_kappa
+        
+        viewpoint.fx = focal
+        viewpoint.fy = focal * viewpoint.aspect_ratio
+        viewpoint.kappa = kappa
+
+        # save ground-truth values
+        viewpoint.fx_init = viewpoint.fx
+        viewpoint.fy_init = viewpoint.fy
+        viewpoint.kappa_init = viewpoint.kappa
+        viewpoint.R_gt = viewpoint.R
+        viewpoint.T_gt = viewpoint.T
+
+        # render a distorted image
+        render_pkg = render(viewpoint, self.gaussians, self.pipe, self.background,
+                            scaling_modifier=1.0,
+                            override_color=None,
+                            mask=None,)
+        image = render_pkg["render"]
+        viewpoint.original_image = image.data.clone()
+        return viewpoint
+
+
+
+    def optimize (self, view_id = 0, max_iters = 1000, set_focal_error=None, set_kappa_error=None, update_pose=False, update_calibration = True):
+        assert ( view_id >= 0 and view_id < len(self.viewpoint_stack) ), f"view_id={view_id} out of range!"
+        viewpoint = self.viewpoint_stack[view_id]
+        if viewpoint.original_image is None:            
+            return
+        
+        _, h, w = viewpoint.original_image.shape
+        self.image_margin_mask = torch.zeros(h, w).cuda()
+        band_with = int(1.0 * self.gaussian_scale_t)
+        self.image_margin_mask[band_with:-band_with,  band_with:-band_with] = 1.0
+        if self.focal_reference is None:
+            self.focal_reference = np.sqrt(h*h + w*w)/2
+
+        if self.calibration_optimizer is None:            
+            self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+            self.calibration_optimizer.update_focal_learning_rate (lr = 0.02) # 0.1 also works
+            self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
+            self.calib_safe_guard = False
+
+        if self.pose_optimizer is None:
+            self.pose_optimizer = PoseOptimizer([ viewpoint ])
+
+        """
+        use noisy initial value
+        """
+        if set_focal_error is not None:
+            noise_fx = set_focal_error
+            focal = viewpoint.fx + noise_fx
+            viewpoint.fx = focal
+            viewpoint.fy = focal * viewpoint.aspect_ratio
+            rich.print(f"[bold red][Notice]: old fx {focal - noise_fx} ====> new fx {focal}.  Noise added {noise_fx}  [/bold red]")
+
+        if set_kappa_error is not None:
+            noise_kappa = set_kappa_error
+            kappa = viewpoint.kappa + noise_kappa
+            viewpoint.kappa = kappa
+            rich.print(f"[bold red][Notice]: old kappa {kappa - noise_kappa} ====> new kappa {kappa}.  Noise added {noise_kappa}  [/bold red]")
+
+
+        if self.use_gui:
+            self.push_to_gui(view_id)
+            time.sleep(1.5)
+
+        sfm_gui.Log("start Camera Resectioning Optimization")
+
+
+        '''
+        Optimization
+        '''
+        for iteration in range(0, max_iters):
+            self.read_gui_ctrl()
+
+            use_scale_space = False,
+            use_ssim_loss = False
+
+            # FORWARD
+            loss = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )            
+            # BACKWARD
+            loss.backward()
+            with torch.no_grad():
+                # calibration step            
+                if update_calibration:
+                    rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
+                    self.calibration_optimizer.focal_step()
+                    if self.allow_lens_distortion:
+                        rich.print(f"[bold red]After loss.backward: [/bold red]{viewpoint.cam_kappa_delta.grad=}")
+                        self.calibration_optimizer.kappa_step()
+                # pose step
+                if update_pose:
+                    self.pose_optimizer.step()
+                self.calibration_optimizer.zero_grad() # clear gradient every iteration
+                self.pose_optimizer.zero_grad() # clear gradient every iteration
+
+            print_viewpoint_stack([ viewpoint ], prefix=f"Camera {view_id}")
+
+            if self.use_gui and (iteration % 5 == 0):
+                self.push_to_gui(view_id)
+
+        sfm_gui.Log(f"optimization complete.")
+        torch.cuda.synchronize()
+
+        self.close()
+
+
+
+
+    """
+
+    subroutines    
+
+    """
+
     def push_to_gui (self, cam_cnt):
-        depth = np.zeros((self.viewpoint_stack[0].image_height, self.viewpoint_stack[0].image_width))
+        depth = np.zeros((self.viewpoint_stack[cam_cnt].image_height, self.viewpoint_stack[cam_cnt].image_width))
         self.q_main2vis.put(
             gui_utils.GaussianPacket(
                 gaussians=clone_obj(self.gaussians),
@@ -170,12 +296,6 @@ class CameraResectioning(mp.Process):
             plt.show()
 
 
-    """
-
-    Optimization subroutines
-
-    
-    """
     def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_SSIM = False):
         # Loss function
         loss = 0.0
@@ -207,136 +327,9 @@ class CameraResectioning(mp.Process):
         if use_SSIM:
             loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
 
-        return loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched
+        return loss
     
  
-    
-
-    def optimize_one_step (self, iteration, update_Gaussian = False, update_pose = False, update_calibration = False,  use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
-
-        self.gaussian_iter += 1
-        self.gaussians.update_learning_rate(self.gaussian_iter)
-
-        for viewpoint in self.viewpoint_stack:
-
-            # FORWARD
-            loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )            
-
-            # BACKWARD
-            loss.backward()
-
-            with torch.no_grad():
-
-                self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-
-                if densify_prune:
-                    sfm_gui.Log("Densify and Prune Gaussians", tag="SFM")
-                    size_threshold = 20 if iteration > self.opt.opacity_reset_interval else None
-                    self.gaussians.densify_and_prune(self.opt.densify_grad_threshold, 0.005, self.cameras_extent, size_threshold)
-                
-                if reset_opacity:
-                    sfm_gui.Log("Reset opacity of all Gaussians", tag="SFM")
-                    self.gaussians.reset_opacity()
-
-            # calibration step            
-            if update_calibration:
-
-                for viewpoint in self.viewpoint_stack:
-                    rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
-                self.calibration_optimizer.focal_step()
-
-                if self.allow_lens_distortion:
-                    for viewpoint in self.viewpoint_stack:
-                        rich.print(f"[bold red]After loss.backward: [/bold red]{viewpoint.cam_kappa_delta.grad=}")
-                    self.calibration_optimizer.kappa_step()
-
-            # pose step
-            if update_pose:
-                self.pose_optimizer.step()
-            
-            # Gaussian step
-            update_Gaussian = False
-            if update_Gaussian:
-                self.gaussians.optimizer.step()
-
-            self.calibration_optimizer.zero_grad() # clear gradient every iteration
-            self.pose_optimizer.zero_grad() # clear gradient every iteration
-            self.gaussians.optimizer.zero_grad(set_to_none = True) # clear gradient every iteration
-
-
-
-
-    def optimize (self, max_iters = 1000, set_focal_error=None):
-
-        _, h, w = self.viewpoint_stack[0].original_image.shape
-        self.image_margin_mask = torch.zeros(h, w).cuda()
-        band_with = int(1.0 * self.gaussian_scale_t)
-        self.image_margin_mask[band_with:-band_with,  band_with:-band_with] = 1.0
-        if self.focal_reference is None:
-            self.focal_reference = np.sqrt(h*h + w*w)/2
-
-        if self.calibration_optimizer is None:            
-            self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-            self.calibration_optimizer.update_focal_learning_rate (lr = 0.03) # 0.1 also works
-            self.calib_safe_guard = False
-
-        if self.pose_optimizer is None:
-            self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
-
-        cam_cnt = 0
-        if self.use_gui:
-            self.push_to_gui(cam_cnt)
-            time.sleep(1.5)
-
-        self.gaussians.training_setup(self.opt)
-
-        sfm_gui.Log("start SfM optimization")
-
-
-        '''
-        Optimization
-        '''
-        progress_bar = tqdm(range(1, max_iters+1), desc="Phase1: Training progress")
-        cam_cnt = 0
-        for iteration in range(0, max_iters):
-            self.read_gui_ctrl()
-            densify_prune = iteration and (iteration % 20 ==0)
-            reset_opacity = iteration and (iteration % 300 ==0)
-            self.optimize_one_step (iteration,
-                                    update_Gaussian = False,
-                                    update_pose = True,
-                                    update_calibration = True,
-                                    use_scale_space = True,
-                                    densify_prune = densify_prune,
-                                    reset_opacity = reset_opacity
-                                    )
-            print_viewpoint_stack(self.viewpoint_stack, prefix="Camera")
-            if self.use_gui and (iteration % 5 == 0):
-                self.push_to_gui(cam_cnt)
-                cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
-            if iteration % 10 == 0:
-                with torch.no_grad():
-                    loss_log = self.compute_loss (use_scale_space = False,  use_SSIM = False )
-                progress_bar.set_postfix({"Loss": f"{loss_log:.{7}f}"})
-                progress_bar.update(10)
-        progress_bar.close()
-
-
-        if set_focal_error is not None:
-            ''' For debug and test
-            '''
-            noise_fx = set_focal_error
-            for viewpoint in self.viewpoint_stack:
-                focal = viewpoint.fx + noise_fx
-                viewpoint.fx = focal
-                viewpoint.fy = viewpoint.aspect_ratio * focal
-            rich.print(f"[bold red][Notice]: old fx {focal - noise_fx} ====> new fx {focal}.  Noise added {noise_fx}  [/bold red]")
-
-        sfm_gui.Log(f"SfM optimization complete.")
-        torch.cuda.synchronize()
-
-        self.close()
 
 
     def close(self):
@@ -390,122 +383,56 @@ class CameraResectioning(mp.Process):
 
 
 
-
-def main():
-
-    camera_file_path = "/hdd/3DGS/bicycle/cameras.json"
-    point_cloud_file_path = "/hdd/3DGS/bicycle/point_cloud/iteration_7000/point_cloud.ply"
-
-
-    gaussians = GaussianModel(sh_degree=0)
-
-    cam_infos = read_camera_json (camera_file_path)
-    gaussians.load_ply(point_cloud_file_path)
-
-
-
 if __name__ == "__main__":
 
     mp.set_start_method('spawn')
 
+    # Set up command line argument parser
+    parser = ArgumentParser(description="Training script parameters")
+    lp = ModelParams(parser)
+    op = OptimizationParams(parser)
+    pp = PipelineParams(parser)
 
-    # # Set up command line argument parser
-    # parser = ArgumentParser(description="Training script parameters")
-    # lp = ModelParams(parser)
-    # op = OptimizationParams(parser)
-    # pp = PipelineParams(parser)
-    # parser.add_argument('--ip', type=str, default="127.0.0.1")
-    # parser.add_argument('--port', type=int, default=6009)
-    # parser.add_argument('--debug_from', type=int, default=-1)
-    # parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    # parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    # parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    # parser.add_argument("--quiet", action="store_true")
-    # parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
-    # parser.add_argument("--start_checkpoint", type=str, default = None)
-    # args = parser.parse_args(sys.argv[1:])
-    # args.save_iterations.append(args.iterations)
-    
-    # print("Optimizing " + args.model_path)
+    parser.add_argument('--detect_anomaly', action='store_true', default=False)
+    parser.add_argument("--quiet", action="store_true")
 
-    # # Initialize system state (RNG)
-    # safe_state(args.quiet)
+    parser.add_argument("--dir", default="/hdd/3DGS/bicycle")
+
+    args = parser.parse_args(sys.argv[1:])
+
+    # Initialize system state (RNG)
+    safe_state(args.quiet)
+
+    dataset = lp.extract(args)
+    opt = op.extract(args)
+    pipe = pp.extract(args)
 
 
-    # dataset = lp.extract(args)
-    # opt = op.extract(args)
-    # pipe = pp.extract(args)
+    base_dir = args.dir
+    iter_num = 7000
+    # iter_num = 30000
 
 
+    """
+    read 3DGS rendering output
+    """
 
-    # opt.iterations = 200
-    # opt.densification_interval = 50
-    # opt.opacity_reset_interval = 350
-    # opt.densify_from_iter = 49
-    # opt.densify_until_iter = 750
-    # opt.densify_grad_threshold = 0.0002
+    camera_file_path = os.path.join(base_dir, "cameras.json")
+    point_cloud_file_path = os.path.join(base_dir, "point_cloud/iteration_"+str(iter_num)+"/point_cloud.ply")
 
+    gaussians = GaussianModel(sh_degree=3)
+    gaussians.load_ply(point_cloud_file_path)
 
-
-    # gaussians = GaussianModel(dataset.sh_degree)
-    # scene = Scene(dataset, gaussians)
-    # cameras_extent = scene.cameras_extent
-
-
-    # N = 3
-
-    # viewpoint_stack = scene.getTrainCameras()
-    # while len(viewpoint_stack) > N:
-    #     viewpoint_stack.pop(-1)
-    # sfm_gui.Log(f"cameras used: {len(scene.getTrainCameras())}")
-
-    # viewpoint_stack = scene.getTrainCameras().copy()
-
-
-    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
+    viewpoint_stack = assemble_3DGS_cameras_from_3DGS_JSON_file (camera_file_path)
 
 
 
-    # ## visualization
-    # use_gui = False
-    # q_main2vis = mp.Queue() if use_gui else FakeQueue()
-    # q_vis2main = mp.Queue() if use_gui else FakeQueue()
+    PnP = CameraResectioning(pipe = pipe, use_gui = True, viewpoint_stack = viewpoint_stack, gaussians = gaussians, opt = opt)
 
+    PnP.set_viewpoint_calibration(view_id=0, delta_focal=50, delta_kappa=0.01)
 
-    # if use_gui:
-    #     bg_color = [0.0, 0.0, 0.0]
-    #     params_gui = gui_utils.ParamsGUI(
-    #         pipe=pipe,
-    #         background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
-    #         gaussians=GaussianModel(dataset.sh_degree),
-    #         q_main2vis=q_main2vis,
-    #         q_vis2main=q_vis2main,
-    #     )
-    #     gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
-    #     gui_process.start()
-    #     time.sleep(1)
-
-
-    # print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
-
-    # sfm = CameraResectioning(pipe, q_main2vis, q_vis2main, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
-
-    # sfm.MODULE_TEST_CALIBRATION = True
-    # sfm.add_calib_noise_iter = 50
-    # sfm.start_calib_iter = 50
-
-    # sfm_process = mp.Process(target=sfm.optimize)
-    # sfm_process.start()
-
-  
-    # torch.cuda.synchronize()
-
-
-    # if use_gui:
-    #     gui_process.join()
-    #     sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
+    PnP.optimize (view_id = 0, max_iters = 1000, set_focal_error=-50, set_kappa_error=-0.01)
 
 
 
-    # sfm_process.join()
-    # sfm_gui.Log("Finished", tag="SfM")
+
