@@ -113,8 +113,8 @@ class Camera(nn.Module):
 
 
         # backup
-        self.R_gt = R
-        self.T_gt = T
+        self.R_gt = self.R.clone()
+        self.T_gt = self.T.clone()
 
         self.fx_init = self.fx
         self.fy_init = self.fy

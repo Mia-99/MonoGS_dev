@@ -54,6 +54,7 @@ from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras_from_3DG
 from matplot_utils import annotate_image
 
 import cv2
+import glob
 
 
 try:
@@ -84,7 +85,7 @@ def print_viewpoint_stack(viewpoint_stack, prefix="Camera"):
 class CameraResectioning(mp.Process):
 
 
-    def __init__(self, pipe = None, use_gui = True, viewpoint_stack = None, gaussians = None, opt = None) -> None:
+    def __init__(self, pipe = None, use_gui = False, viewpoint_stack = None, gaussians = None, opt = None) -> None:
         self.pipe = pipe
         self.use_gui = use_gui
 
@@ -139,6 +140,14 @@ class CameraResectioning(mp.Process):
         assert ( view_id >= 0 and view_id < len(self.viewpoint_stack) ), f"view_id={view_id} out of range!"
         viewpoint = self.viewpoint_stack[view_id]
 
+        # first set to ground-truth
+        viewpoint.fx = viewpoint.fx_init
+        viewpoint.fy = viewpoint.fy_init
+        viewpoint.kappa = viewpoint.kappa_init
+        viewpoint.R = viewpoint.R_gt.clone()
+        viewpoint.T = viewpoint.T_gt.clone()
+
+        # new values
         focal = viewpoint.fx + delta_focal
         kappa = viewpoint.kappa + delta_kappa
         
@@ -150,8 +159,8 @@ class CameraResectioning(mp.Process):
         viewpoint.fx_init = viewpoint.fx
         viewpoint.fy_init = viewpoint.fy
         viewpoint.kappa_init = viewpoint.kappa
-        viewpoint.R_gt = viewpoint.R
-        viewpoint.T_gt = viewpoint.T
+        viewpoint.R_gt = viewpoint.R.clone()
+        viewpoint.T_gt = viewpoint.T.clone()
 
         # render a distorted image
         render_pkg = render(viewpoint, self.gaussians, self.pipe, self.background,
@@ -179,7 +188,7 @@ class CameraResectioning(mp.Process):
 
         if self.calibration_optimizer is None:            
             self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-            self.calibration_optimizer.update_focal_learning_rate (lr = 0.02) # 0.1 also works
+            self.calibration_optimizer.update_focal_learning_rate (lr = 0.02) # 0.002
             self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
             self.calib_safe_guard = False
 
@@ -207,12 +216,13 @@ class CameraResectioning(mp.Process):
             self.push_to_gui(view_id)
             time.sleep(1.5)
 
-        sfm_gui.Log("start Camera Resectioning Optimization")
-
+        sfm_gui.Log("start Camera Resectioning Optimization\n", tag="SFM")        
 
         '''
         Optimization
         '''
+        print_viewpoint_stack([ viewpoint ], prefix=f"Camera {view_id}")
+
         for iteration in range(0, max_iters):
             self.read_gui_ctrl()
 
@@ -241,13 +251,25 @@ class CameraResectioning(mp.Process):
 
             if self.use_gui and (iteration % 5 == 0):
                 self.push_to_gui(view_id)
-                time.sleep(0.5)
+                time.sleep(0.5)        
 
-        sfm_gui.Log(f"optimization complete.")
+        sfm_gui.Log(f"optimization complete.\n", tag="SFM")
         torch.cuda.synchronize()
-
         self.close()
 
+        results = {
+            "fx" : viewpoint.fx,
+            "fy" : viewpoint.fy,
+            "kappa" : viewpoint.kappa,
+            "gt_fx" : viewpoint.fx_init,
+            "gt_fy" : viewpoint.fy_init,
+            "gt_kappa" : viewpoint.kappa_init,
+            "R" : viewpoint.R,
+            "T" : viewpoint.T,
+            "gt_R" : viewpoint.R_gt,
+            "gt_T" : viewpoint.T_gt,
+        }
+        return results
 
 
     def show_rendered_images (self, view_id = None, save_to_dir=None, annotate=True):
@@ -264,11 +286,11 @@ class CameraResectioning(mp.Process):
             image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]
             # convert torch tensor to opencv image
             rgb = self.tensor2rgb(image)
-            mytext = f"view uid: {viewpoint.uid}, fx: {viewpoint.fx: .2f}, fy: {viewpoint.fy: .2f}, k: {viewpoint.kappa: .6f}" if annotate else None
+            mytext = f"view uid: {viewpoint.uid}, fx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f}" if annotate else None
             fig, ax, _ = annotate_image(rgb, cmap=None, mytext = mytext)
             if save_to_dir is not None:
-                post_str = f"_k{viewpoint.kappa: .6f}"
-                plt.savefig(os.path.join(save_to_dir, "view"+str(view_id)+post_str+'.png'), bbox_inches='tight', pad_inches=0)
+                post_str = f"_f{viewpoint.fx:.2f}_k{viewpoint.kappa:.6f}"
+                plt.savefig(os.path.join(save_to_dir, "view"+str(id)+post_str+'.png'), bbox_inches='tight', pad_inches=0)
                 plt.close()
                 time.sleep(0.01)
 
@@ -439,6 +461,9 @@ def distort_by_opencv (image_file, kappa, fx, fy):
     cv2.imwrite('view_cv_out_img_' + f"k{kappa:.6f}" + '.png', out_img)
 
 
+
+
+
 if __name__ == "__main__":
 
     mp.set_start_method('spawn')
@@ -453,15 +478,12 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
 
     parser.add_argument("--data_dir", default="/hdd/3DGS/playroom")
-    parser.add_argument("--data_iter_num", default=7000) # 30000
+    parser.add_argument("--data_iter_num", default=7000) # else 30000
 
     args = parser.parse_args(sys.argv[1:])
 
     base_dir = args.data_dir
     iter_num = args.data_iter_num
-
-    print(args.data_dir)
-    print(args.data_iter_num)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
@@ -488,41 +510,71 @@ if __name__ == "__main__":
     PnP = CameraResectioning(pipe = pipe, use_gui = False, viewpoint_stack = viewpoint_stack, gaussians = gaussians, opt = opt)
 
 
+    """
+    Test image rendering with given calibratoin parameters
+    """
+
     view_id = 0
 
     delta_focal = 0.0
     fx = PnP.viewpoint_stack[view_id].fx
     fy = PnP.viewpoint_stack[view_id].fy
     
+    save_to_dir="."
 
     delta_kappa = 0.0
     PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=False)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
+    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+
+    image_file = glob.glob( os.path.join(save_to_dir, "view0_*k0.000000.png")  )[0]
 
 
-    delta_kappa = -0.000045
+    delta_kappa =  0.55
     PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=True)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+    distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)
 
 
-    delta_kappa = 0.000045 + 0.55
+    delta_kappa = -0.5
     PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=True)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+    distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)   
 
 
-    delta_kappa = 0.000045 - 0.55 - 0.25
+
+    """
+    optimization
+    """
+    view_id = 0
+    delta_focal = 1000.0
+    delta_kappa = -0.5
+    save_to_dir="."
+
     PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=True)
+    results = PnP.optimize (view_id = 0, max_iters = 1000,
+                  set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
+                  update_pose=False, update_calibration = True)
+    rich.print(results)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
 
-    distort_by_opencv (image_file="view0_k 0.000000.png", kappa=0.55, fx=fx, fy=fy)
-    distort_by_opencv (image_file="view0_k 0.000000.png", kappa=-0.25, fx=fx, fy=fy)
 
+    view_id = 0
+    delta_focal = -500.0
+    delta_kappa = -0.5
+    save_to_dir="."
 
-    # PnP.optimize (view_id = 0, max_iters = 1000,
-    #               set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
-    #               update_pose=False, update_calibration = True)
-
+    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+    results = PnP.optimize (view_id = 0, max_iters = 1000,
+                  set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
+                  update_pose=False, update_calibration = True)
+    rich.print(results)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
 
 
