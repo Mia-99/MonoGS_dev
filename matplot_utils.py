@@ -50,18 +50,19 @@ def annotate_image(image, cmap=plt.get_cmap('hot'), mytext = "my text", mytextt 
     paddings
     https://stackoverflow.com/questions/38480739/aligning-a-text-box-edge-with-an-image-corner/38487750
     """
-    an1 = ax.annotate(
-        text = mytext,
-        fontsize = 20,
-        color='snow',
-        xy=(0, 0),
-        xytext=(padding-offset_x, -(padding-offset_y)),
-        textcoords = 'offset pixels',
-        bbox=boxprops,
-        va='top',
-        ha='left',
-        clip_on = True,
-        )
+    if mytext is not None:
+        an1 = ax.annotate(
+            text = mytext,
+            fontsize = 20,
+            color='snow',
+            xy=(0, 0),
+            xytext=(padding-offset_x, -(padding-offset_y)),
+            textcoords = 'offset pixels',
+            bbox=boxprops,
+            va='top',
+            ha='left',
+            clip_on = True,
+            )
 
     if mytextt is not None:
         an2 = ax.annotate(

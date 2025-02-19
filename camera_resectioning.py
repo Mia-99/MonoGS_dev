@@ -51,6 +51,9 @@ from gaussian_viewer import Viewer, create_gaussians_gl
 
 from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras_from_3DGS_JSON_file
 
+from matplot_utils import annotate_image
+
+import cv2
 
 
 try:
@@ -223,7 +226,7 @@ class CameraResectioning(mp.Process):
             with torch.no_grad():
                 # calibration step            
                 if update_calibration:
-                    rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
+                    # rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
                     self.calibration_optimizer.focal_step()
                     if self.allow_lens_distortion:
                         rich.print(f"[bold red]After loss.backward: [/bold red]{viewpoint.cam_kappa_delta.grad=}")
@@ -238,11 +241,39 @@ class CameraResectioning(mp.Process):
 
             if self.use_gui and (iteration % 5 == 0):
                 self.push_to_gui(view_id)
+                time.sleep(0.5)
 
         sfm_gui.Log(f"optimization complete.")
         torch.cuda.synchronize()
 
         self.close()
+
+
+
+    def show_rendered_images (self, view_id = None, save_to_dir=None, annotate=True):
+        # plt.rcParams["font.family"] = "Arial"
+        # plt.rcParams["font.family"] = "Times New Roman"
+        csfont = {'fontname':'Times New Roman'}
+        for id, viewpoint in enumerate(self.viewpoint_stack):
+            if (view_id is not None) and id != view_id:
+                continue
+            render_pkg = render(viewpoint, self.gaussians, self.pipe, self.background,
+                                scaling_modifier=1.0,
+                                override_color=None,
+                                mask=None,)
+            image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]
+            # convert torch tensor to opencv image
+            rgb = self.tensor2rgb(image)
+            mytext = f"view uid: {viewpoint.uid}, fx: {viewpoint.fx: .2f}, fy: {viewpoint.fy: .2f}, k: {viewpoint.kappa: .6f}" if annotate else None
+            fig, ax, _ = annotate_image(rgb, cmap=None, mytext = mytext)
+            if save_to_dir is not None:
+                post_str = f"_k{viewpoint.kappa: .6f}"
+                plt.savefig(os.path.join(save_to_dir, "view"+str(view_id)+post_str+'.png'), bbox_inches='tight', pad_inches=0)
+                plt.close()
+                time.sleep(0.01)
+
+        plt.show(block=False)
+
 
 
 
@@ -280,20 +311,6 @@ class CameraResectioning(mp.Process):
                     data_vis2main = self.q_vis2main.get()
                     self.pause = data_vis2main.flag_pause
 
-
-    def show_rendered_images (self):
-        for viewpoint in self.viewpoint_stack:
-            render_pkg = render(viewpoint, self.gaussians, self.pipe, self.background,
-                                scaling_modifier=1.0,
-                                override_color=None,
-                                mask=None,)
-            image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]
-            # convert torch tensor to opencv image
-            rgb = torch.clamp(image, min=0, max=1.0) * 255
-            rgb = rgb.byte().permute(1, 2, 0).contiguous().cpu().numpy()
-            plt.imshow(rgb)
-            plt.title(f"view uid: {viewpoint.uid}", fontweight ="bold") 
-            plt.show()
 
 
     def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_SSIM = False):
@@ -382,6 +399,45 @@ class CameraResectioning(mp.Process):
 
 
 
+def distort_by_opencv (image_file, kappa, fx, fy):
+    # https://stackoverflow.com/a/68706787/4926757
+    def invert_map(F):
+        sh = (F.shape[0], F.shape[1])
+        I = np.zeros_like(F)
+        I[:,:,1], I[:,:,0] = np.indices(sh)
+        P = np.copy(I)
+        for i in range(10):
+            P += I - cv2.remap(F, P, None, interpolation=cv2.INTER_LINEAR)
+        return P
+
+    k_1 = kappa
+
+    img = cv2.imread(image_file, cv2.IMREAD_COLOR)
+
+    h, w, c = img.shape[0], img.shape[1], img.shape[2]
+
+
+    dist_coeffs = np.array([k_1, 0, 0, 0, 0])  # (k1, k2, p1, p2, k3)
+    camera_matrix = np.eye(3)
+    camera_matrix[0, 0] = fx
+    camera_matrix[1, 1] = fy
+    camera_matrix[0, 2] = (w-1)/2
+    camera_matrix[1, 2] = (h-1)/2
+    new_camera_matrix = camera_matrix.copy()
+
+    # Compute "Undistort" maps:  
+    mapxy, _ = cv2.initUndistortRectifyMap(camera_matrix, dist_coeffs, None, new_camera_matrix, (w, h), m1type=cv2.CV_32FC2)
+
+    # Invert the maps    
+    inv_mapxy = invert_map(mapxy)
+    inv_mapx = inv_mapxy[:, :, 0]
+    inv_mapy = inv_mapxy[:, :, 1]
+
+    # Use the inverted maps
+    out_img = cv2.remap(img, inv_mapx, inv_mapy, cv2.INTER_LINEAR)
+
+    cv2.imwrite('view_cv_out_img_' + f"k{kappa:.6f}" + '.png', out_img)
+
 
 if __name__ == "__main__":
 
@@ -396,9 +452,16 @@ if __name__ == "__main__":
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--quiet", action="store_true")
 
-    parser.add_argument("--dir", default="/hdd/3DGS/bicycle")
+    parser.add_argument("--data_dir", default="/hdd/3DGS/playroom")
+    parser.add_argument("--data_iter_num", default=7000) # 30000
 
     args = parser.parse_args(sys.argv[1:])
+
+    base_dir = args.data_dir
+    iter_num = args.data_iter_num
+
+    print(args.data_dir)
+    print(args.data_iter_num)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
@@ -407,10 +470,6 @@ if __name__ == "__main__":
     opt = op.extract(args)
     pipe = pp.extract(args)
 
-
-    base_dir = args.dir
-    iter_num = 7000
-    # iter_num = 30000
 
 
     """
@@ -426,12 +485,43 @@ if __name__ == "__main__":
     viewpoint_stack = assemble_3DGS_cameras_from_3DGS_JSON_file (camera_file_path)
 
 
+    PnP = CameraResectioning(pipe = pipe, use_gui = False, viewpoint_stack = viewpoint_stack, gaussians = gaussians, opt = opt)
 
-    PnP = CameraResectioning(pipe = pipe, use_gui = True, viewpoint_stack = viewpoint_stack, gaussians = gaussians, opt = opt)
 
-    PnP.set_viewpoint_calibration(view_id=0, delta_focal=50, delta_kappa=0.01)
+    view_id = 0
 
-    PnP.optimize (view_id = 0, max_iters = 1000, set_focal_error=-50, set_kappa_error=-0.01)
+    delta_focal = 0.0
+    fx = PnP.viewpoint_stack[view_id].fx
+    fy = PnP.viewpoint_stack[view_id].fy
+    
+
+    delta_kappa = 0.0
+    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=False)
+
+
+    delta_kappa = -0.000045
+    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=True)
+
+
+    delta_kappa = 0.000045 + 0.55
+    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=True)
+
+
+    delta_kappa = 0.000045 - 0.55 - 0.25
+    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+    PnP.show_rendered_images(view_id, save_to_dir=".", annotate=True)
+
+
+    distort_by_opencv (image_file="view0_k 0.000000.png", kappa=0.55, fx=fx, fy=fy)
+    distort_by_opencv (image_file="view0_k 0.000000.png", kappa=-0.25, fx=fx, fy=fy)
+
+
+    # PnP.optimize (view_id = 0, max_iters = 1000,
+    #               set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
+    #               update_pose=False, update_calibration = True)
 
 
 
