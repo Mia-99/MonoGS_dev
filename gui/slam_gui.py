@@ -460,7 +460,7 @@ class SLAM_GUI:
             depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
 
             # colormap='nipy_spectral'
-            # depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+            # depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0 if abs(depth.max() - depth.min()) > 0.0001 else depth
             # depth = depth.astype(np.uint8)
             # cmap = matplotlib.colormaps.get_cmap(colormap)
             # depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
