@@ -637,7 +637,7 @@ class BackEnd(mp.Process):
                     current_window = data[3]
                     depth_map = data[4]
 
-                    rich.print(f"[bold blue]BackEnd  Receive :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}")
+                    rich.print(f"[bold blue]BackEnd  Receive :[/bold blue] [{cur_frame_idx:05d}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}")
 
                     current_calib_id = viewpoint.calib_id                  
 
@@ -834,7 +834,7 @@ class BackEnd(mp.Process):
                     CC = viewpoint.camera_center.cpu().numpy()
                     exposure_a = viewpoint.exposure_a.data.item()
                     exposure_b = viewpoint.exposure_b.data.item()
-                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx}]: fx: {cur_keyframe.fx:.3f}, fy: {cur_keyframe.fy:.3f}, kappa: {cur_keyframe.kappa:.6f}, calib_id: {cur_keyframe.calib_id}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f}). iter_per_kf: {iter_per_kf}\n")
+                    rich.print(f"[bold blue]BackEnd  Optimize:[/bold blue] [{cur_frame_idx:05d}]: fx: {cur_keyframe.fx:.3f}, fy: {cur_keyframe.fy:.3f}, kappa: {cur_keyframe.kappa:.6f}, calib_id: {cur_keyframe.calib_id}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f}). iter_per_kf: {iter_per_kf}\n")
 
                 else:
                     raise Exception("Unprocessed data", data)

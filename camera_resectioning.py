@@ -77,7 +77,7 @@ def print_viewpoint_stack(viewpoint_stack, prefix="Camera"):
         CC = viewpoint_cam.camera_center.cpu().numpy()
         exposure_a = viewpoint_cam.exposure_a.data.item()
         exposure_b = viewpoint_cam.exposure_b.data.item()
-        rich.print(f"[bold blue]{prefix}[/bold blue] uid: [{uid}]: calib_id: {calib_id}. fx: {fx:.3f}, fy: {fy:.3f}, kappa: {kappa:.6f}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f})")
+        rich.print(f"[bold blue]{prefix}[/bold blue] uid: [{uid:05d}]: calib_id: {calib_id}. fx: {fx:.3f}, fy: {fy:.3f}, kappa: {kappa:.6f}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f})")
 
 
 
@@ -272,24 +272,45 @@ class CameraResectioning(mp.Process):
         return results
 
 
-    def show_rendered_images (self, view_id = None, save_to_dir=None, annotate=True):
+    def show_rendered_images (self, view_id = None, save_to_dir=None, annotate=True,  use_gt_image=False):
         # plt.rcParams["font.family"] = "Arial"
         # plt.rcParams["font.family"] = "Times New Roman"
         csfont = {'fontname':'Times New Roman'}
         for id, viewpoint in enumerate(self.viewpoint_stack):
             if (view_id is not None) and id != view_id:
                 continue
+
+            if use_gt_image:
+                fx, fy, kappa = viewpoint.fx, viewpoint.fy, viewpoint.kappa
+                R, T = viewpoint.R.clone(), viewpoint.T.clone()
+                viewpoint.fx = viewpoint.fx_init
+                viewpoint.fy = viewpoint.fy_init
+                viewpoint.kappa = viewpoint.kappa_init
+                viewpoint.R = viewpoint.R_gt.clone()
+                viewpoint.T = viewpoint.T_gt.clone()
+            
             render_pkg = render(viewpoint, self.gaussians, self.pipe, self.background,
                                 scaling_modifier=1.0,
                                 override_color=None,
                                 mask=None,)
             image, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["opacity"], render_pkg["n_touched"]
+
+            if use_gt_image:
+                viewpoint.fx = fx
+                viewpoint.fy = fy
+                viewpoint.kappa = kappa
+                viewpoint.R = R
+                viewpoint.T = T
+
             # convert torch tensor to opencv image
             rgb = self.tensor2rgb(image)
-            mytext = f"view uid: {viewpoint.uid}, fx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f}" if annotate else None
+            gt_str, est_str = "ground-truth", "estimation"
+            # mytext = f"view uid: {viewpoint.uid}\n{gt_str:<7}fx: {viewpoint.fx_init:.2f}, fy: {viewpoint.fy_init:.2f}, k: {viewpoint.kappa_init:.6f}\n{est_str:<7}fx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f}" if annotate else None
+            mytext = f"fx: {viewpoint.fx_init:.2f}, fy: {viewpoint.fy_init:.2f}, k: {viewpoint.kappa_init:.6f} ({gt_str:<12})\nfx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f} ({est_str:<12})" if annotate else None
+            # mytext = f"fx: {viewpoint.fx_init:.2f}, fy: {viewpoint.fy_init:.2f}, k: {viewpoint.kappa_init:.6f}\nfx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f}" if annotate else None
             fig, ax, _ = annotate_image(rgb, cmap=None, mytext = mytext)
             if save_to_dir is not None:
-                post_str = f"_f{viewpoint.fx:.2f}_k{viewpoint.kappa:.6f}"
+                post_str = f"_f{viewpoint.fx_init:.2f}_k{viewpoint.kappa_init:.6f}"
                 plt.savefig(os.path.join(save_to_dir, "view"+str(id)+post_str+'.png'), bbox_inches='tight', pad_inches=0)
                 plt.close()
                 time.sleep(0.01)
@@ -532,14 +553,14 @@ if __name__ == "__main__":
 
     delta_kappa =  0.55
     PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
     PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
     distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)
 
 
     delta_kappa = -0.5
     PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
     PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
     distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)   
 
@@ -558,13 +579,13 @@ if __name__ == "__main__":
                   set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
                   update_pose=False, update_calibration = True)
     rich.print(results)
-    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
     PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
 
 
     view_id = 0
-    delta_focal = -500.0
+    delta_focal = -200.0
     delta_kappa = -0.5
     save_to_dir="."
 
@@ -573,7 +594,7 @@ if __name__ == "__main__":
                   set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
                   update_pose=False, update_calibration = True)
     rich.print(results)
-    PnP.show_rendered_images(view_id, save_to_dir, annotate=True)
+    PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
     PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
 

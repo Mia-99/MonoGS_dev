@@ -153,7 +153,7 @@ class CalibrationOptimizer:
                     viewpoint_cam.fx += focal_delta
                     viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta                
                     CC = viewpoint_cam.camera_center.cpu().numpy()
-                    print(f">> uid: [{viewpoint_cam.uid}], opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_n: {focal_delta_normalized:.7f}, grad_n: {focal_grad_normalized:.7f}, cam_center: [{CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}], exposure: [a: {viewpoint_cam.exposure_a.data.item():.5f}, b: {viewpoint_cam.exposure_b.data.item():.5f}]")
+                    print(f">> uid: [{viewpoint_cam.uid:05d}], opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_n: {focal_delta_normalized:.7f}, grad_n: {focal_grad_normalized:.7f}, cam_center: [{CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}], exposure: [a: {viewpoint_cam.exposure_a.data.item():.5f}, b: {viewpoint_cam.exposure_b.data.item():.5f}]")
                 return focal/self.focal_normalizer, focal_grad_normalized
 
 
@@ -166,7 +166,7 @@ class CalibrationOptimizer:
                 kappa_grad  = self.kappa_delta_groups [ cam_calib_id ].grad.cpu().numpy()[0]                
                 for viewpoint_cam in cam_stack:
                     viewpoint_cam.kappa += kappa_delta
-                    print(f">> uid: [{viewpoint_cam.uid}], opt_kappa={viewpoint_cam.kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
+                    print(f">> uid: [{viewpoint_cam.uid:05d}], opt_kappa={viewpoint_cam.kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
                 return kappa_grad
 
     

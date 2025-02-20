@@ -494,7 +494,7 @@ class FrontEnd(mp.Process):
                     if (not self.signal_calibration_change): # only do it once
                         self.calib_id += viewpoint.calib_id
                         self.calibration_frame_idx = cur_frame_idx                        
-                        rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx}")
+                        rich.print(f"\n[bold red]FrontEnd: calibration change detected at frame_idx: [/bold red]{cur_frame_idx:05d}")
                         self.backend_queue.put(["calibration_change"])
                     self.signal_calibration_change = True
                     self.calibration_keyframe_sent = False
@@ -666,7 +666,7 @@ class FrontEnd(mp.Process):
                     CC = viewpoint.camera_center.cpu().numpy()
                     exposure_a = viewpoint.exposure_a.data.item()
                     exposure_b = viewpoint.exposure_b.data.item()
-                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f})")
+                    rich.print(f"[bold blue]FrontEnd Send    :[/bold blue] [{cur_frame_idx:05d}]: fx: {viewpoint.fx:.3f}, fy: {viewpoint.fy:.3f}, kappa: {viewpoint.kappa:.6f}, calib_id: {viewpoint.calib_id}. cam_center: ({CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}), exposure: (a: {exposure_a:.5f}, b: {exposure_b:.5f})")
                 else:
                     self.cleanup(cur_frame_idx)
                 cur_frame_idx += 1
@@ -719,7 +719,7 @@ class FrontEnd(mp.Process):
                         calib = copy.deepcopy(kf_calib)
                         kf_fx, kf_fy, kf_kappa = calib[0], calib[1], calib[2]
                         self.cameras[cur_frame_idx-self.use_every_n_frames].update_calibration(kf_fx, kf_fy, kf_kappa)
-                        rich.print(f"[bold blue]FrontEnd Recieve :[/bold blue] [{cur_frame_idx}]: update_calibration: fx: {kf_fx:.3f}, fy: {kf_fy:.3f}, kappa: {kf_kappa:.6f}, calib_id: {calib_id}, initialized: {self.calibration_initialized}")
+                        rich.print(f"[bold blue]FrontEnd Recieve :[/bold blue] [{cur_frame_idx:05d}]: update_calibration: fx: {kf_fx:.3f}, fy: {kf_fy:.3f}, kappa: {kf_kappa:.6f}, calib_id: {calib_id}, initialized: {self.calibration_initialized}")
 
 
 
