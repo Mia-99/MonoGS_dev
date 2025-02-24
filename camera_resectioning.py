@@ -212,6 +212,9 @@ class CameraResectioning(mp.Process):
         self.background = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device="cuda")
         self.rgb_boundary_threshold = 0.01
 
+
+        self.debug = False
+
         self.pause = False
         
 
@@ -305,7 +308,8 @@ class CameraResectioning(mp.Process):
         viewpoint = self.viewpoint_stack[view_id]
         if viewpoint.original_image is None:
             print("viewpoint.original_image is None.")
-            return
+            return        
+        self.debug = True
         
         gt_focal = viewpoint.fx_init
         gt_kappa = viewpoint.kappa_init
@@ -389,13 +393,13 @@ class CameraResectioning(mp.Process):
             return
         
         _, h, w = viewpoint.original_image.shape
-        self.gaussian_scale_t = 0.01 * max(w,h)  if self.gaussian_scale_t is None else self.gaussian_scale_t
-        self.focal_reference = np.sqrt(h*h + w*w)/2 if self.focal_reference is None else self.focal_reference
+        self.gaussian_scale_t = 0.01 * max(w,h)  # if self.gaussian_scale_t is None else self.gaussian_scale_t
+        self.focal_reference = np.sqrt(h*h + w*w)/2 # if self.focal_reference is None else self.focal_reference
 
         if self.calibration_optimizer is None:            
             self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
             self.calibration_optimizer.update_focal_learning_rate (lr = 0.02) # 0.002
-            self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
+            self.calibration_optimizer.update_kappa_learning_rate (lr = 0.01)
             # self.calib_safe_guard = False
 
         if self.pose_optimizer is None:
@@ -439,7 +443,7 @@ class CameraResectioning(mp.Process):
             """
             if (iteration == scale_space_iters):
                 use_scale_space = False
-                # self.switch_to_SGD_optimize([ viewpoint ])
+                self.switch_to_SGD_optimize([ viewpoint ])
             
             # FORWARD
             loss = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )            
@@ -545,7 +549,7 @@ class CameraResectioning(mp.Process):
     def switch_to_SGD_optimize(self, viewpoint_stack):
         lr = self.calibration_optimizer.estimate_step_size()
         self.calibration_optimizer = CalibrationOptimizer(viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "SGD")
-        self.calibration_optimizer.update_focal_learning_rate (lr = 0.1*lr)
+        self.calibration_optimizer.update_focal_learning_rate (lr = 0.5*lr)
         self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
     
 
@@ -610,19 +614,26 @@ class CameraResectioning(mp.Process):
             image_scale_t = image
             gt_image_scale_t = gt_image
 
-        """
-        Use a Huber-type loss function for smooth gradients at minumum
-        - HuberLoss
-        - SmoothL1Loss
-        parameters decided by residual = |f(x) - y|
-        """
-        # huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
-        huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
-        Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
-        loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
 
-        # Ll1 = l1_loss(image_scale_t*mask, gt_image_scale_t*mask)
-        # loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
+        if use_scale_space or self.debug:
+            """
+            Use a Huber-type loss function for smooth gradients at minumum
+            - HuberLoss
+            - SmoothL1Loss
+            parameters decided by residual = |f(x) - y|
+            """
+            # huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+            huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
+            Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
+            loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
+
+        else:
+            """
+            standard L1 loss
+            """
+            Ll1 = l1_loss(image_scale_t*mask, gt_image_scale_t*mask)
+            loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
+
 
         # enable SSIM loss when a good intialial reconstruction is attained
         if use_SSIM:
@@ -763,7 +774,7 @@ if __name__ == "__main__":
     """
     Test image rendering with given calibratoin parameters
     """
-    if True:
+    if False:
 
         PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
 
@@ -803,26 +814,23 @@ if __name__ == "__main__":
     """
     Gaussian Scale Space: Effect on optimization
     """
-    if True:
+    if False:
 
         PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir="/hdd/3DGS/train", iter_num=7000)
+
+        view_id = 0
+        save_to_dir="."
 
         delta_focal = 0.0
         delta_kappa = -0.0
         PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
         PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
-        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
         PnP.require_calibration = True
         PnP.allow_lens_distortion = True
 
-        view_id = 0
-        save_to_dir="."
         results1 = PnP.sample_cost_space(view_id = 0, num_samples = 100, use_scale_space = False)
         results2 = PnP.sample_cost_space(view_id = 0, num_samples = 100, use_scale_space = True)
-
-        # print(results1)
-        # print(results2)
 
         focal_stack1, focal_grad_stack1, gaussian_scale_t1, loss_stack1 = results1["focal_stack"], results1["focal_grad_stack"], results1["gaussian_scale_t"], results1["loss_stack"]
         focal_stack2, focal_grad_stack2, gaussian_scale_t2, loss_stack2 = results2["focal_stack"], results2["focal_grad_stack"], results2["gaussian_scale_t"], results2["loss_stack"]
@@ -839,44 +847,32 @@ if __name__ == "__main__":
                                  opts=opts,
                                  fname = "focal_cost_function.pdf")
 
-        # rich.print(opts)
-
-
 
     """
     optimization
     """
     if True:
+
+        datasets_all = [  "bicycle", "bonsai", "counter", "drjohnson", "flowers", "garden", "kitchen", "playroom", "room", "stump", "train", "treehill", "truck"  ]
         
+        view_id = 0
+        save_to_dir="."
+
+        max_iters = 2000
+        scale_space_iters = -100
+
         PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
 
-        view_id = 0
-        delta_focal = 1000.0
-        delta_kappa = -0.5
-        save_to_dir="."
+        delta_focal, delta_kappa = 1000.0, -0.5
 
         PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-        results = PnP.optimize (view_id = 0, max_iters = 1000,
+        results = PnP.optimize (view_id, max_iters = max_iters,
                     set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
-                    update_pose=False, update_calibration = True)
+                    update_pose=False, update_calibration = True, scale_space_iters=scale_space_iters)
         rich.print(results)
         PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
         PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
-
-
-        view_id = 0
-        delta_focal = -200.0
-        delta_kappa = -0.5
-        save_to_dir="."
-
-        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-        results = PnP.optimize (view_id = 0, max_iters = 1000,
-                    set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
-                    update_pose=False, update_calibration = True)
-        rich.print(results)
-        PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
-        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
 
 
