@@ -789,8 +789,21 @@ class FrontEnd(mp.Process):
      
             # Gaussian scale space
             image_scale_t = image_conv_gaussian_separable(image_ab, sigma=gaussian_scale_t, epsilon=0.01) if gaussian_scale_t > 0.5 else image_ab
-            l1 = opacity * rgb_pixel_mask * torch.abs(image_scale_t - gt_image_scale_t)
-            loss = l1.mean()
+
+            # l1 = opacity * rgb_pixel_mask * torch.abs(image_scale_t - gt_image_scale_t)
+            # loss = l1.mean()
+
+            """
+            Use a Huber-type loss function for smooth gradients at minumum
+            - HuberLoss
+            - SmoothL1Loss
+            parameters decided by residual = |f(x) - y|
+            """
+            mask = opacity * rgb_pixel_mask
+            # huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+            huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
+            loss = huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
+
 
             if save_info is not None:
                 postfix = "_scale"+str(gaussian_scale_t) + "_itr"+str(itr)+"_focal"+str(viewpoint.fx)+".png"

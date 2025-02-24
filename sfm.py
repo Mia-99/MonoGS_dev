@@ -13,6 +13,7 @@ import copy
 import random
 
 import torch
+torch.cuda.set_device(0)
 import torch.multiprocessing as mp
 import torch.optim.lr_scheduler as lr_scheduler
 
@@ -219,12 +220,23 @@ class SFM(mp.Process):
             image_scale_t = image
             gt_image_scale_t = gt_image
 
-        Ll1 = l1_loss(image_scale_t*mask, gt_image_scale_t*mask)
-        loss += (1.0 - self.opt.lambda_dssim) * Ll1
+        """
+        Use a Huber-type loss function for smooth gradients at minumum
+        - HuberLoss
+        - SmoothL1Loss
+        parameters decided by residual = |f(x) - y|
+        """
+        # huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+        huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
+        Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
+        loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
+
+        # Ll1 = l1_loss(image_scale_t*mask, gt_image_scale_t*mask)
+        # loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
 
         # enable SSIM loss when a good intialial reconstruction is attained
         if use_SSIM:
-            loss += self.opt.lambda_dssim * (1.0 - ssim(image*mask, gt_image*mask))
+            loss += self.opt.lambda_dssim * (1.0 - ssim(image_scale_t*mask, gt_image_scale_t*mask))
 
         return loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched
     
@@ -760,6 +772,7 @@ class SFM(mp.Process):
 if __name__ == "__main__":
 
     mp.set_start_method('spawn')
+    torch.cuda.set_device(0)
 
 
     # Set up command line argument parser
@@ -834,7 +847,7 @@ if __name__ == "__main__":
     
 
     ## visualization
-    use_gui = True
+    use_gui = False
     sfm = SFM(pipe=pipe, use_gui=use_gui, viewpoint_stack=viewpoint_stack, gaussians=gaussians, opt=opt, cameras_extent=cameras_extent)
     sfm.require_calibration = True
     sfm.allow_lens_distortion = True
