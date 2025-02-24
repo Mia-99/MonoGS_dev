@@ -112,75 +112,81 @@ def plot_optimisation_steps (xdata1, ydata1, yydata1, xdata2, ydata2, yydata2,
     scale_t2  = opts["gaussian_scale_t2"]
     gf_title  = opts["global_title"]
 
-
     plt.rcParams['text.usetex'] = True
-    plt.rcParams["figure.figsize"] = (8,3)
+    # plt.rcParams['text.latex.preamble'] = [r'\usepackage{sfmath} \boldmath']
+    plt.rcParams["figure.figsize"] = (5, 3)
+    plt.rcParams['xtick.labelsize'] = 7
+    plt.rcParams['ytick.labelsize'] = 7
+    plt.rcParams['axes.labelsize'] = 10
+    plt.rcParams['axes.titlesize'] = 10
+    plt.rcParams['axes.edgecolor'] = 'gray'
 
-    color1='r'
-    color2='b'
+    color1='mediumblue'
+    color2='chocolate'
+    color3='gray'
 
     fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
 
-    # Loss
-    ax1.plot(xdata1, ydata1, '+-', color=color1, label=f"scale_t = {scale_t1:.2f}")
-    ax1.plot(xdata2, ydata2, '.-', color=color2, label=f"scale_t = {scale_t2:.2f}")
-    # Loss Gradient
-    ax2.plot(xdata1, yydata1, '+', color=color1, label=f"scale_t = {scale_t1:.2f}")
-    ax2.plot(xdata2, yydata2, '.', color=color2, label=f"scale_t = {scale_t2:.2f}")
+    ax1.axvline(gt_datax1, linestyle="--",  color=color3)
+    ax2.axvline(gt_datax2, linestyle="--", color=color3)
+    ax1.axhline(0, linestyle="--", color=color3)
+    ax2.axhline(0, linestyle="--", color=color3)
 
-    # ax1, ax1r = custom_twin_plot(ax1, xdata1, ydata1, yydata1, mask=np.arange(0, len(xdata1)), color1=color1, color2=color2)
-    # ax1, ax1r = custom_twin_plot(ax1, xdata2, ydata2, yydata2, mask=np.arange(0, len(xdata2)), color1=color1, color2=color2)
+    # Loss
+    ax1.plot(xdata1, ydata1, '-',  color=color1, label=f"scale_t = {scale_t1:.2f}")
+    ax1.plot(xdata2, ydata2, '-',  color=color2, label=f"scale_t = {scale_t2:.2f}")
+    # Loss Gradient
+    ax2.plot(xdata1, yydata1, '-', color=color1, label=f"scale_t = {scale_t1:.2f}")
+    ax2.plot(xdata2, yydata2, '-', color=color2, label=f"scale_t = {scale_t2:.2f}")
 
     if True:
 
-        ax1.axvline(gt_datax1, color="k")
-        ax2.axvline(gt_datax2, color="k")
-        ax1.axhline(0, color=color1)
-        ax2.axhline(0, color=color1)
-        # ax1r.axhline(0, color=color2)
-        # ax2r.axhline(0, color=color2)
-
-        ax1.set_title(f"loss")
+        ax1.set_title(f"loss", fontweight='bold')
         ax1.set_xlabel(r"normalized focal length $f$", color='k')
-        ax1.set_ylabel(r"$L(f)$", color=color1)
+        ax1.set_ylabel(r"$L(f)$", color="k")
         # ax1r.set_ylabel(r"$\nabla L(f)$", color=color2)    
-        ax1.spines['left'].set_color (color1)
-        ax1.spines['right'].set_color (color2)
-        ax1.spines['left'].set_linewidth(2)
-        ax1.spines['right'].set_linewidth(2)
-        ax1.spines['bottom'].set_linewidth(2)
-        ax1.tick_params(axis='y', colors=color1)
+        # ax1.spines['left'].set_color (color1)
+        # ax1.spines['right'].set_color (color2)
+        # ax1.spines['left'].set_linewidth(2)
+        # ax1.spines['right'].set_linewidth(2)
+        # ax1.spines['bottom'].set_linewidth(2)
+        # ax1.tick_params(axis='y', colors=color1)
         # ax1r.tick_params(axis='y', colors=color2)
-        # ax1.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+
+        # ax1.ticklabel_format(axis='y', style='sci', scilimits=(0,0))        
         # tight axis
         ax1.autoscale(enable=True, axis='x', tight=True)
         ax1.autoscale(enable=True, axis='y', tight=False)
 
 
 
-        ax2.set_title(f"loss gradient")
+        ax2.set_title(f"loss gradient", fontweight='bold')
         ax2.set_xlabel(r"normalized focal length $f$", color='k')
-        ax2.set_ylabel(r"$\nabla L(f)$", color=color1)
+        ax2.set_ylabel(r"$\nabla L(f)$", color="k")
         # ax2r.set_ylabel(r"$\nabla L(f)$", color=color2)    
-        ax2.spines['left'].set_color (color1)
-        ax2.spines['right'].set_color (color2)
-        ax2.spines['left'].set_linewidth(2)
-        ax2.spines['right'].set_linewidth(2)
-        ax2.spines['bottom'].set_linewidth(2)
-        ax2.tick_params(axis='y', colors=color1)
+        # ax2.spines['left'].set_color (color1)
+        # ax2.spines['right'].set_color (color2)
+        # ax2.spines['left'].set_linewidth(2)
+        # ax2.spines['right'].set_linewidth(2)
+        # ax2.spines['bottom'].set_linewidth(2)
+        # ax2.tick_params(axis='y', colors=color1)
         # ax2r.tick_params(axis='y', colors=color2)
+
         # tight axis
         ax2.autoscale(enable=True, axis='x', tight=True)
         ax2.autoscale(enable=True, axis='y', tight=False)
 
 
+    ax1.tick_params(direction='out', length=2, width=2, colors='k', grid_color='r', grid_alpha=0.5)
+    ax2.tick_params(direction='out', length=2, width=2, colors='k', grid_color='r', grid_alpha=0.5)
+
     handles, labels = ax2.get_legend_handles_labels()
-    fig.legend(handles, labels, loc='upper center', #bbox_to_anchor=(0.5, -0.05),
+    fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 1.0),
           fancybox=True, shadow=False, ncol = 2)
 
     # tight layout
     fig.suptitle(" ")
-    plt.tight_layout(pad=0.4, w_pad=1.2, h_pad=0.0)
+    plt.tight_layout(pad=1.0, w_pad=1.5, h_pad=0.0)
     plt.savefig(fname=fname)
 
     plt.show(block=False)
@@ -241,6 +247,21 @@ class CameraResectioning(mp.Process):
             time.sleep(3)
 
 
+    @staticmethod
+    def init_from_3DGS_output_dir(pipe = None, use_gui = False, opt = None, base_dir="/hdd/3DGS/train", iter_num=7000):
+        """
+        read 3DGS rendering output
+        """        
+        camera_file_path = os.path.join(base_dir, "cameras.json")
+        point_cloud_file_path = os.path.join(base_dir, "point_cloud/iteration_"+str(iter_num)+"/point_cloud.ply")
+
+        gaussians = GaussianModel(sh_degree=3)
+        gaussians.load_ply(point_cloud_file_path)
+
+        viewpoint_stack = assemble_3DGS_cameras_from_3DGS_JSON_file (camera_file_path)
+
+        return  CameraResectioning(pipe = pipe, use_gui = use_gui, viewpoint_stack = viewpoint_stack, gaussians = gaussians, opt = opt)
+
 
     def set_viewpoint_calibration (self, view_id=0, delta_focal=0.0, delta_kappa=0.0):
         assert ( view_id >= 0 and view_id < len(self.viewpoint_stack) ), f"view_id={view_id} out of range!"
@@ -282,7 +303,8 @@ class CameraResectioning(mp.Process):
     def sample_cost_space(self, view_id = 0, num_samples = 100, use_scale_space = False):
         assert ( view_id >= 0 and view_id < len(self.viewpoint_stack) ), f"view_id={view_id} out of range!"
         viewpoint = self.viewpoint_stack[view_id]
-        if viewpoint.original_image is None:            
+        if viewpoint.original_image is None:
+            print("viewpoint.original_image is None.")
             return
         
         gt_focal = viewpoint.fx_init
@@ -325,8 +347,8 @@ class CameraResectioning(mp.Process):
                     kappa_grad = viewpoint.cam_kappa_delta.grad.cpu().numpy()[0]
                     focal_grad_stack.append(focal_grad)
                     kappa_grad_stack.append(kappa_grad)
-                    self.zero_calib_grad(viewpoint)                
-        
+                    self.zero_calib_grad(viewpoint)
+
         results = {
             "fx" : viewpoint.fx,
             "fy" : viewpoint.fy,
@@ -700,6 +722,8 @@ def distort_by_opencv (image_file, kappa, fx, fy):
 
     cv2.imwrite('view_cv_out_img_' + f"k{kappa:.6f}" + '.png', out_img)
 
+    
+
 
 
 
@@ -734,54 +758,43 @@ if __name__ == "__main__":
 
 
 
-    """
-    read 3DGS rendering output
-    """
-
-    camera_file_path = os.path.join(base_dir, "cameras.json")
-    point_cloud_file_path = os.path.join(base_dir, "point_cloud/iteration_"+str(iter_num)+"/point_cloud.ply")
-
-    gaussians = GaussianModel(sh_degree=3)
-    gaussians.load_ply(point_cloud_file_path)
-
-    viewpoint_stack = assemble_3DGS_cameras_from_3DGS_JSON_file (camera_file_path)
-
-
-    PnP = CameraResectioning(pipe = pipe, use_gui = False, viewpoint_stack = viewpoint_stack, gaussians = gaussians, opt = opt)
-
+    
 
     """
     Test image rendering with given calibratoin parameters
     """
+    if True:
 
-    view_id = 0
+        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
 
-    delta_focal = 0.0
-    fx = PnP.viewpoint_stack[view_id].fx
-    fy = PnP.viewpoint_stack[view_id].fy
-    
-    save_to_dir="."
+        view_id = 0
 
-    delta_kappa = 0.0
-    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
-    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+        delta_focal = 0.0
+        fx = PnP.viewpoint_stack[view_id].fx
+        fy = PnP.viewpoint_stack[view_id].fy
+        
+        save_to_dir="."
 
-    image_file = glob.glob( os.path.join(save_to_dir, "view0_*k0.000000.png")  )[0]
+        delta_kappa = 0.0
+        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+        PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
+        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
-
-    delta_kappa =  0.55
-    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
-    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
-    distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)
+        image_file = glob.glob( os.path.join(save_to_dir, "view0_*k0.000000.png")  )[0]
 
 
-    delta_kappa = -0.5
-    PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
-    PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
-    distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)   
+        delta_kappa =  0.55
+        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+        PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
+        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+        distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)
+
+
+        delta_kappa = -0.5
+        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+        PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
+        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+        distort_by_opencv (image_file=image_file, kappa=delta_kappa, fx=fx, fy=fy)   
 
 
 
@@ -791,19 +804,28 @@ if __name__ == "__main__":
     Gaussian Scale Space: Effect on optimization
     """
     if True:
+
+        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir="/hdd/3DGS/train", iter_num=7000)
+
+        delta_focal = 0.0
+        delta_kappa = -0.0
+        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+        PnP.show_rendered_images(view_id, save_to_dir, annotate=False)
+        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+
         PnP.require_calibration = True
-        PnP.allow_lens_distortion = False
+        PnP.allow_lens_distortion = True
 
         view_id = 0
         save_to_dir="."
         results1 = PnP.sample_cost_space(view_id = 0, num_samples = 100, use_scale_space = False)
         results2 = PnP.sample_cost_space(view_id = 0, num_samples = 100, use_scale_space = True)
 
+        # print(results1)
+        # print(results2)
+
         focal_stack1, focal_grad_stack1, gaussian_scale_t1, loss_stack1 = results1["focal_stack"], results1["focal_grad_stack"], results1["gaussian_scale_t"], results1["loss_stack"]
         focal_stack2, focal_grad_stack2, gaussian_scale_t2, loss_stack2 = results2["focal_stack"], results2["focal_grad_stack"], results2["gaussian_scale_t"], results2["loss_stack"]
-        
-        print(results1)
-        print(results2)
 
         opts = {
             "ground_truth_x1" : ( results1["gt_fx"] / results1["focal_reference"] ),
@@ -816,95 +838,45 @@ if __name__ == "__main__":
                                  focal_stack2, loss_stack2, focal_grad_stack2,
                                  opts=opts,
                                  fname = "focal_cost_function.pdf")
-        rich.print(opts)
 
-
-
-    if False:
-        PnP.require_calibration = True
-        PnP.allow_lens_distortion = False
-
-        view_id = 0
-        delta_focal = 1500.0
-        delta_kappa = -0.01
-        save_to_dir="."
-
-        max_iters = 100
-
-        # no scale space
-        scale_space_iters=0
-        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-        results1 = PnP.optimize (view_id = 0, max_iters = max_iters,
-                    set_focal_error=-delta_focal, set_kappa_error=0.0,
-                    update_pose=False, update_calibration = True,  scale_space_iters=scale_space_iters)
-        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
-        rich.print(results1)
-        PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
-        focal_stack1, focal_grad_stack1, gaussian_scale_t1 = results1["focal_stack"], results1["focal_grad_stack"], results1["gaussian_scale_t"]
-
-        # scale space
-        scale_space_iters=1000
-        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-        results2 = PnP.optimize (view_id = 0, max_iters = max_iters,
-                    set_focal_error=-delta_focal, set_kappa_error=0.0,
-                    update_pose=False, update_calibration = True,  scale_space_iters=scale_space_iters)
-        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
-        rich.print(results2)
-        PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
-        focal_stack2, focal_grad_stack2, gaussian_scale_t2 = results2["focal_stack"], results2["focal_grad_stack"], results2["gaussian_scale_t"]
-
-        # plot iterative steps
-        
-        opts = {
-            "ground_truth_x1" : ( results1["gt_fx"] / results1["focal_reference"] ),
-            "ground_truth_x2" : ( results2["gt_fx"] / results2["focal_reference"] ),
-            "gaussian_scale_t1" : gaussian_scale_t1,
-            "gaussian_scale_t2" : gaussian_scale_t2,
-            "global_title" : r"$\nabla L(f) = 2 a f + b $"
-        }
-        plot_optimisation_steps (focal_stack1, focal_grad_stack1,
-                                focal_stack2, focal_grad_stack2,
-                                opts=opts,
-                                fname = "focal_cost_function.pdf")
-        rich.print(opts)
-
-
-
-
-
+        # rich.print(opts)
 
 
 
     """
     optimization
     """
-    # view_id = 0
-    # delta_focal = 1000.0
-    # delta_kappa = -0.5
-    # save_to_dir="."
+    if True:
+        
+        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
 
-    # PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    # results = PnP.optimize (view_id = 0, max_iters = 1000,
-    #               set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
-    #               update_pose=False, update_calibration = True)
-    # rich.print(results)
-    # PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
-    # PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+        view_id = 0
+        delta_focal = 1000.0
+        delta_kappa = -0.5
+        save_to_dir="."
+
+        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+        results = PnP.optimize (view_id = 0, max_iters = 1000,
+                    set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
+                    update_pose=False, update_calibration = True)
+        rich.print(results)
+        PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
+        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
 
 
-    # view_id = 0
-    # delta_focal = -200.0
-    # delta_kappa = -0.5
-    # save_to_dir="."
+        view_id = 0
+        delta_focal = -200.0
+        delta_kappa = -0.5
+        save_to_dir="."
 
-    # PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-    # results = PnP.optimize (view_id = 0, max_iters = 1000,
-    #               set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
-    #               update_pose=False, update_calibration = True)
-    # rich.print(results)
-    # PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
-    # PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+        results = PnP.optimize (view_id = 0, max_iters = 1000,
+                    set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
+                    update_pose=False, update_calibration = True)
+        rich.print(results)
+        PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
+        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
 
 
 
