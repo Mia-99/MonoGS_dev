@@ -45,16 +45,20 @@ from matplotlib import pyplot as plt
 import pathlib
 import rich
 import json
+import pickle
 
 from gaussian_viewer import Viewer, create_gaussians_gl
 
 
 from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras_from_3DGS_JSON_file
 
-from matplot_utils import annotate_image
+from matplot_utils import annotate_image, annotate_image_by_table
 
 import cv2
 import glob
+from gaussian_splatting.utils.system_utils import mkdir_p
+
+
 
 
 try:
@@ -232,6 +236,7 @@ class CameraResectioning(mp.Process):
         self.MODULE_TEST_CALIBRATION = False
         self.add_calib_noise_iter = -1
 
+        self.focal_stack, self.focal_grad_stack, self.kappa_stack, self.kappa_grad_stack, self.loss_stack = [], [], [], [], []
 
         self.q_main2vis = mp.Queue() if self.use_gui else FakeQueue()
         self.q_vis2main = mp.Queue() if self.use_gui else FakeQueue()
@@ -314,9 +319,7 @@ class CameraResectioning(mp.Process):
         gt_focal = viewpoint.fx_init
         gt_kappa = viewpoint.kappa_init
 
-        focal_stack, focal_grad_stack = [], []
-        kappa_stack, kappa_grad_stack = [], []
-        loss_stack = []
+        self.focal_stack, self.focal_grad_stack, self.kappa_stack, self.kappa_grad_stack, self.loss_stack = [], [], [], [], []
 
         _, h, w = viewpoint.original_image.shape
         self.gaussian_scale_t = 0.01 * max(w,h)
@@ -333,24 +336,24 @@ class CameraResectioning(mp.Process):
         for focal in focal_array:
             for kappa in kappa_array:
 
-                focal_stack.append(focal)
-                kappa_stack.append(kappa)
+                self.focal_stack.append(focal)
+                self.kappa_stack.append(kappa)
 
                 viewpoint.fx = focal
                 viewpoint.fy = focal * viewpoint.aspect_ratio
                 viewpoint.kappa = kappa
 
                 # FORWARD
-                loss = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = False )
+                loss = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space, use_smooth_l1 = True, use_SSIM = False )
                 # BACKWARD
                 loss.backward()
-                # print(f"loss = {loss.data.cpu().numpy()}")
+                # print(f"loss = {loss.data.cpu().numpy().item()}")
                 with torch.no_grad():
-                    loss_stack.append(loss.data.cpu().numpy())
+                    self.loss_stack.append(loss.data.cpu().numpy().item())
                     focal_grad = viewpoint.cam_focal_delta.grad.cpu().numpy()[0] # * self.focal_reference
                     kappa_grad = viewpoint.cam_kappa_delta.grad.cpu().numpy()[0]
-                    focal_grad_stack.append(focal_grad)
-                    kappa_grad_stack.append(kappa_grad)
+                    self.focal_grad_stack.append(focal_grad)
+                    self.kappa_grad_stack.append(kappa_grad)
                     self.zero_calib_grad(viewpoint)
 
         results = {
@@ -364,9 +367,11 @@ class CameraResectioning(mp.Process):
             "T" : viewpoint.T,
             "gt_R" : viewpoint.R_gt,
             "gt_T" : viewpoint.T_gt,
-            "focal_stack" : np.array(focal_stack)/self.focal_reference,
-            "focal_grad_stack" : np.array(focal_grad_stack)*self.focal_reference,
-            "loss_stack" : np.array(loss_stack),
+            "focal_stack" : np.array(self.focal_stack)/self.focal_reference,
+            "focal_grad_stack" : np.array(self.focal_grad_stack)*self.focal_reference,
+            "kappa_stack" : np.array(self.kappa_stack),
+            "kappa_grad_stack" : np.array(self.kappa_grad_stack),
+            "loss_stack" : np.array(self.loss_stack),
             "gaussian_scale_t" : self.gaussian_scale_t if use_scale_space else 0.0,
             "focal_reference" : self.focal_reference
         }
@@ -386,7 +391,7 @@ class CameraResectioning(mp.Process):
             viewpoint.cam_kappa_delta.grad.fill_(0)
 
 
-    def optimize (self, view_id = 0, max_iters = 1000, set_focal_error=None, set_kappa_error=None, update_pose=False, update_calibration = True, scale_space_iters=0):
+    def optimize (self, view_id = 0, max_iters = 1000, set_focal_error=None, set_kappa_error=None, update_pose=False, update_calibration = True, scale_space_iters=-1, use_smooth_l1=True):
         assert ( view_id >= 0 and view_id < len(self.viewpoint_stack) ), f"view_id={view_id} out of range!"
         viewpoint = self.viewpoint_stack[view_id]
         if viewpoint.original_image is None:            
@@ -428,13 +433,13 @@ class CameraResectioning(mp.Process):
 
         sfm_gui.Log("start Camera Resectioning Optimization\n", tag="SFM")        
 
+        self.focal_stack, self.focal_grad_stack, self.kappa_stack, self.kappa_grad_stack, self.loss_stack = [], [], [], [], []
         '''
         Optimization
         '''
         print_viewpoint_stack([ viewpoint ], prefix=f"Camera {view_id}")
 
-        use_scale_space = True #initial
-        use_ssim_loss = False  #initial
+        use_scale_space = (scale_space_iters > 0) #initial
 
         for iteration in range(0, max_iters):
             self.read_gui_ctrl()
@@ -443,13 +448,27 @@ class CameraResectioning(mp.Process):
             """
             if (iteration == scale_space_iters):
                 use_scale_space = False
-                self.switch_to_SGD_optimize([ viewpoint ])
+            
+            if (iteration == 500):
+                lr = self.calibration_optimizer.estimate_step_size()
+                self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+                self.calibration_optimizer.update_focal_learning_rate (lr = 0.01)
+                self.calibration_optimizer.update_kappa_learning_rate (lr = 0.01)
             
             # FORWARD
-            loss = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )            
+            loss = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space, use_smooth_l1 = (use_scale_space and use_smooth_l1), use_SSIM = False )            
             # BACKWARD
             loss.backward()
             with torch.no_grad():
+                # record iteration info.
+                self.loss_stack.append(loss.data.cpu().numpy().item())
+                self.focal_stack.append(viewpoint.fx)
+                self.kappa_stack.append(viewpoint.kappa)
+                focal_grad = viewpoint.cam_focal_delta.grad.cpu().numpy()[0] # * self.focal_reference
+                kappa_grad = viewpoint.cam_kappa_delta.grad.cpu().numpy()[0]
+                self.focal_grad_stack.append(focal_grad)
+                self.kappa_grad_stack.append(kappa_grad)
+
                 # calibration step            
                 if update_calibration:
                     # rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
@@ -473,11 +492,6 @@ class CameraResectioning(mp.Process):
         torch.cuda.synchronize()
         self.close()
 
-
-        # num_line_elements = self.calibration_optimizer.num_line_elements
-        focal_stack, focal_grad_stack = self.calibration_optimizer.get_focal_statistics(all=True)        
-        # L = LineDetection(focal_stack[-num_line_elements:], focal_grad_stack[-num_line_elements:]).estimate_Lipschitz_constant() if not (focal_stack is None or len(focal_stack) == 0) else None
-        # est_step_size = 1.0 / L if L is not None else None
         results = {
             "fx" : viewpoint.fx,
             "fy" : viewpoint.fy,
@@ -489,8 +503,11 @@ class CameraResectioning(mp.Process):
             "T" : viewpoint.T,
             "gt_R" : viewpoint.R_gt,
             "gt_T" : viewpoint.T_gt,
-            "focal_stack" : focal_stack,
-            "focal_grad_stack" : focal_grad_stack,
+            "focal_stack" : self.focal_stack,
+            "focal_grad_stack" : self.focal_grad_stack,
+            "kappa_stack" : self.kappa_stack,
+            "kappa_grad_stack" : self.kappa_grad_stack,
+            "loss_stack" : self.loss_stack,
             "gaussian_scale_t" : self.gaussian_scale_t if scale_space_iters > 0 else 0.0,
             "focal_reference" : self.focal_reference
         }
@@ -499,7 +516,7 @@ class CameraResectioning(mp.Process):
         return results
 
 
-    def show_rendered_images (self, view_id = None, save_to_dir=None, annotate=True,  use_gt_image=False):
+    def show_rendered_images (self, view_id = None, save_to_dir=None, annotate=True,  use_gt_image=False, resize_to_width=None):
         # plt.rcParams["font.family"] = "Arial"
         # plt.rcParams["font.family"] = "Times New Roman"
         csfont = {'fontname':'Times New Roman'}
@@ -530,30 +547,46 @@ class CameraResectioning(mp.Process):
                 viewpoint.T = T
 
             # convert torch tensor to opencv image
-            rgb = self.tensor2rgb(image)
-            gt_str, est_str = "ground-truth", "estimation"
-            # mytext = f"view uid: {viewpoint.uid}\n{gt_str:<7}fx: {viewpoint.fx_init:.2f}, fy: {viewpoint.fy_init:.2f}, k: {viewpoint.kappa_init:.6f}\n{est_str:<7}fx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f}" if annotate else None
-            mytext = f"fx: {viewpoint.fx_init:.2f}, fy: {viewpoint.fy_init:.2f}, k: {viewpoint.kappa_init:.6f} ({gt_str:<12})\nfx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f} ({est_str:<12})" if annotate else None
-            # mytext = f"fx: {viewpoint.fx_init:.2f}, fy: {viewpoint.fy_init:.2f}, k: {viewpoint.kappa_init:.6f}\nfx: {viewpoint.fx:.2f}, fy: {viewpoint.fy:.2f}, k: {viewpoint.kappa:.6f}" if annotate else None
-            fig, ax, _ = annotate_image(rgb, cmap=None, mytext = mytext)
+            rgb_original = self.tensor2rgb(image)
+
+            # resize the image            
+            if resize_to_width is not None:
+                h, w, _ = rgb_original.shape
+                dim = (resize_to_width, int( resize_to_width*h/w ))
+                rgb = cv2.resize(rgb_original, dim, interpolation = cv2.INTER_AREA)
+                print(f"resize image [(H, W, C)] from {rgb_original.shape} to {rgb.shape}")
+            else:
+                rgb = rgb_original
+
+            gt_str, init_str, est_str = "ground-truth", "initialization", "estimation"
+            
+            focal_ground_truth, kappa_ground_truth = viewpoint.fx_init, viewpoint.kappa_init
+            focal_estimate, kappa_estimate = viewpoint.fx, viewpoint.kappa
+
+            focal_initial = self.focal_stack[0] if len(self.focal_stack) else viewpoint.fx_init
+            kappa_initial = self.kappa_stack[0] if len(self.kappa_stack) else viewpoint.kappa_init
+
+            headers = '*', 'fx', 'k', gt_str, f'{focal_ground_truth:.2f}', f'{kappa_ground_truth:.5f}', init_str, f'{focal_initial:.2f}', f'{kappa_initial:.5f}', est_str, f'{focal_estimate:.2f}', f'{kappa_estimate:.5f}'
+            format_spec = '{:15}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}'
+            mytext = f"{format_spec.format(*headers)}" if annotate else None
+
+            fig, ax, _ = annotate_image_by_table(rgb, cmap=None, mytext = mytext)
+
             if save_to_dir is not None:
                 post_str = f"_f{viewpoint.fx_init:.2f}_k{viewpoint.kappa_init:.6f}"
                 plt.savefig(os.path.join(save_to_dir, "view"+str(id)+post_str+'.png'), bbox_inches='tight', pad_inches=0)
                 plt.close()
                 time.sleep(0.01)
 
+                with open( os.path.join(save_to_dir, "view"+str(id)+post_str+'.txt'), "w" ) as myfile:
+                    myfile.write(f"{format_spec.format(*headers)}")
+
+
         plt.show(block=False)
 
 
 
-    def switch_to_SGD_optimize(self, viewpoint_stack):
-        lr = self.calibration_optimizer.estimate_step_size()
-        self.calibration_optimizer = CalibrationOptimizer(viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "SGD")
-        self.calibration_optimizer.update_focal_learning_rate (lr = 0.5*lr)
-        self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
     
-
-
 
     """
 
@@ -590,7 +623,7 @@ class CameraResectioning(mp.Process):
 
 
 
-    def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_SSIM = False):
+    def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_smooth_l1 = False, use_SSIM = False):
         # Loss function
         loss = 0.0
 
@@ -615,15 +648,15 @@ class CameraResectioning(mp.Process):
             gt_image_scale_t = gt_image
 
 
-        if use_scale_space or self.debug:
+        if use_smooth_l1:
             """
             Use a Huber-type loss function for smooth gradients at minumum
             - HuberLoss
             - SmoothL1Loss
             parameters decided by residual = |f(x) - y|
             """
-            # huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
-            huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
+            huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+            # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
             Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
             loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
 
@@ -846,33 +879,103 @@ if __name__ == "__main__":
                                  focal_stack2, loss_stack2, focal_grad_stack2,
                                  opts=opts,
                                  fname = "focal_cost_function.pdf")
+        
+        sys.exit()
+
+
 
 
     """
     optimization
+    Download "Pre-trained Models (14 GB)" from 3DGS repo: https://github.com/graphdeco-inria/gaussian-splatting?tab=readme-ov-file#training-speed-acceleration
+
+    Execute in command line:
+
+        wget https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/pretrained/models.zip
+
     """
     if True:
 
-        datasets_all = [  "bicycle", "bonsai", "counter", "drjohnson", "flowers", "garden", "kitchen", "playroom", "room", "stump", "train", "treehill", "truck"  ]
-        
-        view_id = 0
-        save_to_dir="."
-
         max_iters = 2000
-        scale_space_iters = -100
+        dataset_root_dir = "/hdd/3DGS"
 
-        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
-
-        delta_focal, delta_kappa = 1000.0, -0.5
-
-        PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
-        results = PnP.optimize (view_id, max_iters = max_iters,
-                    set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
-                    update_pose=False, update_calibration = True, scale_space_iters=scale_space_iters)
-        rich.print(results)
-        PnP.show_rendered_images(view_id, save_to_dir, annotate=True, use_gt_image=True)
-        PnP.set_viewpoint_calibration(view_id, delta_focal=-delta_focal, delta_kappa=-delta_kappa) # cancel previous changes
+        for dataset_name in [ "drjohnson", "playroom", "train", "truck",  "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "bicycle"  ]:
+            base_dir = os.path.join(dataset_root_dir, dataset_name)
+            save_to_dir = os.path.join("result_pnp", dataset_name)
+            mkdir_p(save_to_dir)
+            PnP = None
+            torch.cuda.empty_cache()
+            PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
+            PnP.set_viewpoint_calibration(view_id=0, delta_focal=0.0, delta_kappa=0.0)
+            PnP.show_rendered_images(view_id=0, save_to_dir=save_to_dir, annotate=False, use_gt_image=True, resize_to_width=640)
 
 
+        results_dict = {}
+
+        for dataset_name in [ "drjohnson", "playroom", "train", "truck",  "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "bicycle"  ]:
+        # for dataset_name in [  "playroom" ]:
+
+            base_dir = os.path.join(dataset_root_dir, dataset_name)
+
+            results_dict[dataset_name] = {}
+            """
+            different optimization strategies:
+            """
+            for scale_space_iters in [-1, 500]:
+                for use_smooth_l1 in [True, False]:
+
+                    gss_str = 'Y' if (scale_space_iters > 0) else 'N'
+                    sl1_str = 'Y' if use_smooth_l1 else 'N'
+                    gss_sl1_str = "gss" + gss_str + "_sl1" + sl1_str
+
+                    results_dict[dataset_name][gss_sl1_str] = {}
+                    """
+                    different calibration parameters:
+                    """
+                    for delta_focal_ratio in [-0.3, 0.5]:
+                        for delta_kappa in [-0.3, 0.3]:
+
+                            focal_str = "U" if (delta_focal_ratio>0) else "D"
+                            kappa_str = "U" if (delta_kappa>0) else "D"
+                            focal_kappa_str = "f" + focal_str + "_k" + kappa_str
+
+                            results_dict[dataset_name][gss_sl1_str][focal_kappa_str] = {}
+                            '''
+                            views
+                            '''
+                            for view_id in [0]:
+
+                                PnP = None
+                                torch.cuda.empty_cache()
+
+                                save_to_dir = os.path.join("result_pnp", dataset_name, gss_sl1_str)
+                                mkdir_p(save_to_dir)
+
+                                PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
+
+                                focal_ref = PnP.viewpoint_stack[view_id].fx
+                                delta_focal = delta_focal_ratio*focal_ref
+
+                                PnP.set_viewpoint_calibration(view_id, delta_focal=delta_focal, delta_kappa=delta_kappa)
+
+                                results = PnP.optimize (view_id, max_iters = max_iters, set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
+                                            update_pose=False, update_calibration=True, scale_space_iters=scale_space_iters, use_smooth_l1=use_smooth_l1)
+                                
+                                PnP.show_rendered_images(view_id, save_to_dir, annotate=False, use_gt_image=True, resize_to_width=640)
+
+                                results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id] = results
 
 
+                                with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'wb') as fp:
+                                    pickle.dump(results_dict, fp)
+                                    print('dictionary saved successfully to file')
+
+
+    # Read dictionary pkl file
+    # with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
+    #     results_dict = pickle.load(fp)
+    # rich.print(results_dict)
+
+
+
+    

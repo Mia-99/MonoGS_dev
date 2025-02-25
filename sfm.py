@@ -196,7 +196,7 @@ class SFM(mp.Process):
 
 
 
-    def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_SSIM = False):
+    def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_smooth_l1 = False, use_SSIM = False):
         # Loss function
         loss = 0.0
 
@@ -220,19 +220,25 @@ class SFM(mp.Process):
             image_scale_t = image
             gt_image_scale_t = gt_image
 
-        """
-        Use a Huber-type loss function for smooth gradients at minumum
-        - HuberLoss
-        - SmoothL1Loss
-        parameters decided by residual = |f(x) - y|
-        """
-        # huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
-        huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
-        Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
-        loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
 
-        # Ll1 = l1_loss(image_scale_t*mask, gt_image_scale_t*mask)
-        # loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
+        if use_smooth_l1:
+            """
+            Use a Huber-type loss function for smooth gradients at minumum
+            - HuberLoss
+            - SmoothL1Loss
+            parameters decided by residual = |f(x) - y|
+            """
+            huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+            # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
+            Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
+            loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
+
+        else:
+            """
+            standard L1 loss
+            """
+            Ll1 = l1_loss(image_scale_t*mask, gt_image_scale_t*mask)
+            loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
 
         # enable SSIM loss when a good intialial reconstruction is attained
         if use_SSIM:
