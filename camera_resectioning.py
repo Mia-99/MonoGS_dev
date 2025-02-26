@@ -566,9 +566,14 @@ class CameraResectioning(mp.Process):
             focal_initial = self.focal_stack[0] if len(self.focal_stack) else viewpoint.fx_init
             kappa_initial = self.kappa_stack[0] if len(self.kappa_stack) else viewpoint.kappa_init
 
-            headers = '*', 'fx', 'k', gt_str, f'{focal_ground_truth:.2f}', f'{kappa_ground_truth:.5f}', init_str, f'{focal_initial:.2f}', f'{kappa_initial:.5f}', est_str, f'{focal_estimate:.2f}', f'{kappa_estimate:.5f}'
+            headers = (
+                '*', 'fx', 'k',
+                gt_str,   f'{focal_ground_truth:.2f}', f'{kappa_ground_truth:.5f}',
+                init_str, f'{focal_initial:.2f}',      f'{kappa_initial:.5f}',
+                est_str,  f'{focal_estimate:.2f}',     f'{kappa_estimate:.5f}'
+            )
             format_spec = '{:15}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}'
-            mytext = f"{format_spec.format(*headers)}" if annotate else None
+            mytext = format_spec.format(*headers) if annotate else None
 
             fig, ax, _ = annotate_image_by_table(rgb, cmap=None, mytext = mytext)
 
@@ -579,7 +584,7 @@ class CameraResectioning(mp.Process):
                 time.sleep(0.01)
 
                 with open( os.path.join(save_to_dir, "view"+str(id)+post_str+'.txt'), "w" ) as myfile:
-                    myfile.write(f"{format_spec.format(*headers)}")
+                    myfile.write(format_spec.format(*headers))
 
 
         plt.show(block=False)
@@ -724,6 +729,15 @@ class CameraResectioning(mp.Process):
         rgb = rgb.byte().permute(1, 2, 0).contiguous().cpu().numpy()
         return rgb
     
+
+    def clean(self):
+        self.calibration_optimizer = None
+        self.pose_optimizer = None
+        self.gaussians = None
+        for viewpoint in self.viewpoint_stack:
+            viewpoint.clean()
+        torch.cuda.empty_cache()
+        
 
 
 
@@ -894,7 +908,7 @@ if __name__ == "__main__":
         wget https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/pretrained/models.zip
 
     """
-    if True:
+    if False:
 
         max_iters = 2000
         dataset_root_dir = "/hdd/3DGS"
@@ -970,12 +984,47 @@ if __name__ == "__main__":
                                     pickle.dump(results_dict, fp)
                                     print('dictionary saved successfully to file')
 
+                                PnP.clean()
 
-    # Read dictionary pkl file
-    # with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
-    #     results_dict = pickle.load(fp)
-    # rich.print(results_dict)
+    else:
+
+        with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
+            results_dict = pickle.load(fp)
+
+
+        for dataset_name in results_dict:
+
+            for gss_sl1_str in results_dict[dataset_name]:
+                # print("\t\t", gss_sl1_str)
+                for focal_kappa_str in results_dict[dataset_name][gss_sl1_str]:
+                    # print("\t\t\t", focal_kappa_str)
+                    for view_id in results_dict[dataset_name][gss_sl1_str][focal_kappa_str]:
+                        print("\n\t", dataset_name, "|", gss_sl1_str, "|", focal_kappa_str, "|", view_id)
+
+                        res = results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id]
+                        
+                        fx_est, fy_est, kappa_est = res["fx"], res["fy"], res["kappa"]
+                        fx_gt, fy_gt, kappa_gt = res["gt_fx"], res["gt_fy"], res["gt_kappa"]
+                        aspect_ratio = fy_gt / fx_gt
+                        fx_init, fy_init, kappa_init = res["focal_stack"][0], res["focal_stack"][0]*aspect_ratio, res["kappa_stack"][0]
+
+                        # relative error
+                        err_fx = (fx_est - fx_gt) / fx_gt
+                        err_fy = (fy_est - fy_gt) / fy_gt
+                        err_kappa = (kappa_est - kappa_gt) / kappa_gt
+                        '''
+                        print result
+                        '''
+                        headers = (
+                            '*', 'fx', 'fy', 'k', 
+                            "gt",   f'{fx_gt:.2f}',   f'{fy_gt:.2f}',   f'{kappa_gt:.5f}',
+                            "init", f'{fx_init:.2f}', f'{fy_init:.2f}', f'{kappa_init:.5f}',
+                            "est",  f'{fx_est:.2f}',  f'{fy_est:.2f}',  f'{kappa_est:.5f}',
+                            "error(f)",f'{err_fx:.5f}',  f'{err_fy:.5f}',  f'{err_kappa:.5f}',
+                            "error(%)",f'{err_fx:.3%}',  f'{err_fy:.3%}',  f'{err_kappa:.3%}'
+                        )
+                        format_spec = '{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}'
+                        print(format_spec.format(*headers))
 
 
 
-    

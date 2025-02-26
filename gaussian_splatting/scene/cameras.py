@@ -233,7 +233,19 @@ class Camera(nn.Module):
         )
 
 
+    def clean(self):
+        # del self.original_image
+        # del self.depth
+        
+        self.original_image = None
+        self.depth = None
+        self.grad_mask = None
 
+        self.cam_rot_delta = None
+        self.cam_trans_delta = None
+
+        self.exposure_a = None
+        self.exposure_b = None
 
 
 
