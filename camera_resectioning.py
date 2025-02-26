@@ -54,6 +54,7 @@ from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras_from_3DG
 
 from matplot_utils import annotate_image, annotate_image_by_table
 
+import itertools
 import cv2
 import glob
 from gaussian_splatting.utils.system_utils import mkdir_p
@@ -203,12 +204,10 @@ def plot_optimisation_steps (xdata1, ydata1, yydata1, xdata2, ydata2, yydata2,
 class CameraResectioning(mp.Process):
 
 
-    def __init__(self, pipe = None, use_gui = False, viewpoint_stack = None, gaussians = None, opt = None) -> None:
-        self.pipe = pipe
-        self.use_gui = use_gui
-
+    def __init__(self, viewpoint_stack = None, gaussians = None, pipe = None, opt = None) -> None:
         self.viewpoint_stack = viewpoint_stack   # list of cameras
         self.gaussians = gaussians   # fixed in camera resectioning
+        self.pipe = pipe
         self.opt = opt
 
         self.gaussians.optimizer = None # Do NOT optimize Gaussian
@@ -238,25 +237,10 @@ class CameraResectioning(mp.Process):
 
         self.focal_stack, self.focal_grad_stack, self.kappa_stack, self.kappa_grad_stack, self.loss_stack = [], [], [], [], []
 
-        self.q_main2vis = mp.Queue() if self.use_gui else FakeQueue()
-        self.q_vis2main = mp.Queue() if self.use_gui else FakeQueue()
-
-        if self.use_gui:
-            bg_color = [0.0, 0.0, 0.0]
-            params_gui = gui_utils.ParamsGUI(
-                pipe=pipe,
-                background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
-                gaussians=self.gaussians if self.gaussians is not None else GaussianModel(0),
-                q_main2vis=self.q_main2vis,
-                q_vis2main=self.q_vis2main,
-            )
-            self.gui_process = mp.Process(target=sfm_gui.run, args=(params_gui,))
-            self.gui_process.start()
-            time.sleep(3)
 
 
     @staticmethod
-    def init_from_3DGS_output_dir(pipe = None, use_gui = False, opt = None, base_dir="/hdd/3DGS/train", iter_num=7000):
+    def init_from_3DGS_output_dir(pipe = None, opt = None, base_dir="/hdd/3DGS/train", iter_num=7000):
         """
         read 3DGS rendering output
         """        
@@ -268,7 +252,7 @@ class CameraResectioning(mp.Process):
 
         viewpoint_stack = assemble_3DGS_cameras_from_3DGS_JSON_file (camera_file_path)
 
-        return  CameraResectioning(pipe = pipe, use_gui = use_gui, viewpoint_stack = viewpoint_stack, gaussians = gaussians, opt = opt)
+        return  CameraResectioning(viewpoint_stack = viewpoint_stack, gaussians = gaussians, pipe = pipe, opt = opt)
 
 
     def set_viewpoint_calibration (self, view_id=0, delta_focal=0.0, delta_kappa=0.0):
@@ -427,9 +411,6 @@ class CameraResectioning(mp.Process):
             rich.print(f"[bold red][Notice]: old kappa {kappa - noise_kappa} ====> new kappa {kappa}.  Noise added {noise_kappa}  [/bold red]")
 
 
-        if self.use_gui:
-            self.push_to_gui(view_id)
-            time.sleep(1.5)
 
         sfm_gui.Log("start Camera Resectioning Optimization\n", tag="SFM")        
 
@@ -442,7 +423,6 @@ class CameraResectioning(mp.Process):
         use_scale_space = (scale_space_iters > 0) #initial
 
         for iteration in range(0, max_iters):
-            self.read_gui_ctrl()
             """
                 Disable Gaussian scale space at iter = scale_space_iters
             """
@@ -483,10 +463,7 @@ class CameraResectioning(mp.Process):
                 self.pose_optimizer.zero_grad() # clear gradient every iteration
 
             print_viewpoint_stack([ viewpoint ], prefix=f"Camera {view_id}")
-
-            if self.use_gui and (iteration % 5 == 0):
-                self.push_to_gui(view_id)
-                time.sleep(0.5)        
+       
 
         sfm_gui.Log(f"optimization complete.\n", tag="SFM")
         torch.cuda.synchronize()
@@ -558,7 +535,7 @@ class CameraResectioning(mp.Process):
             else:
                 rgb = rgb_original
 
-            gt_str, init_str, est_str = "ground-truth", "initialization", "estimation"
+            gt_str, init_str, est_str = "gt", "init", "est"
             
             focal_ground_truth, kappa_ground_truth = viewpoint.fx_init, viewpoint.kappa_init
             focal_estimate, kappa_estimate = viewpoint.fx, viewpoint.kappa
@@ -599,35 +576,6 @@ class CameraResectioning(mp.Process):
 
     """
 
-    def push_to_gui (self, cam_cnt):
-        depth = np.zeros((self.viewpoint_stack[cam_cnt].image_height, self.viewpoint_stack[cam_cnt].image_width))
-        self.q_main2vis.put(
-            gui_utils.GaussianPacket(
-                gaussians=clone_obj(self.gaussians),
-                keyframes=self.viewpoint_stack,
-                current_frame=self.viewpoint_stack[cam_cnt],
-                gtcolor=self.viewpoint_stack[cam_cnt].original_image,
-                gtdepth=depth,
-            )
-        )
-        time.sleep(0.001)
-    
-
-    def read_gui_ctrl (self):
-        # interaction with gui interface Pause/Resume
-        if not self.q_vis2main.empty():
-            data_vis2main = self.q_vis2main.get()
-            self.pause = data_vis2main.flag_pause            
-            while self.pause:
-                if self.q_vis2main.empty():
-                        time.sleep(0.01)
-                        continue
-                else:
-                    data_vis2main = self.q_vis2main.get()
-                    self.pause = data_vis2main.flag_pause
-
-
-
     def compute_loss_one_view (self, viewpoint, use_scale_space = False, use_smooth_l1 = False, use_SSIM = False):
         # Loss function
         loss = 0.0
@@ -660,7 +608,8 @@ class CameraResectioning(mp.Process):
             - SmoothL1Loss
             parameters decided by residual = |f(x) - y|
             """
-            huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
+            beta = 1.0 if self.debug else 0.1
+            huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = beta)
             # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
             Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
             loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
@@ -681,15 +630,6 @@ class CameraResectioning(mp.Process):
     
  
 
-
-    def close(self):
-        torch.cuda.synchronize()
-        if self.use_gui:
-            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-            self.gui_process.join()
-            sfm_gui.Log("GUI Stopped and joined the main thread", tag="GUI")
-        time.sleep(0.01)
-    
 
     def eval_data(self):
         W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images, error_images = [], [], [], [], [], [], []
@@ -823,7 +763,7 @@ if __name__ == "__main__":
     """
     if False:
 
-        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
+        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, opt = opt, base_dir=base_dir, iter_num=iter_num)
 
         view_id = 0
 
@@ -863,7 +803,7 @@ if __name__ == "__main__":
     """
     if False:
 
-        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir="/hdd/3DGS/train", iter_num=7000)
+        PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, opt = opt, base_dir="/hdd/3DGS/train", iter_num=7000)
 
         view_id = 0
         save_to_dir="."
@@ -908,7 +848,7 @@ if __name__ == "__main__":
         wget https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/pretrained/models.zip
 
     """
-    if False:
+    if True:
 
         max_iters = 2000
         dataset_root_dir = "/hdd/3DGS"
@@ -919,15 +859,20 @@ if __name__ == "__main__":
             mkdir_p(save_to_dir)
             PnP = None
             torch.cuda.empty_cache()
-            PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
+            PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, opt = opt, base_dir=base_dir, iter_num=iter_num)
             PnP.set_viewpoint_calibration(view_id=0, delta_focal=0.0, delta_kappa=0.0)
             PnP.show_rendered_images(view_id=0, save_to_dir=save_to_dir, annotate=False, use_gt_image=True, resize_to_width=640)
 
 
-        results_dict = {}
+        try:
+            with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
+                results_dict = pickle.load(fp)
+        except:
+            results_dict = {}
 
-        for dataset_name in [ "drjohnson", "playroom", "train", "truck",  "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "bicycle"  ]:
-        # for dataset_name in [  "playroom" ]:
+
+        for dataset_name in [ "drjohnson", "playroom", "train", "truck" ]:
+        # for dataset_name in [  "drjohnson" ]:
 
             base_dir = os.path.join(dataset_root_dir, dataset_name)
 
@@ -946,8 +891,8 @@ if __name__ == "__main__":
                     """
                     different calibration parameters:
                     """
-                    for delta_focal_ratio in [-0.3, 0.5]:
-                        for delta_kappa in [-0.3, 0.3]:
+                    for delta_focal_ratio in [-0.4, 0.7]:
+                        for delta_kappa in [-0.35, 0.35]:
 
                             focal_str = "U" if (delta_focal_ratio>0) else "D"
                             kappa_str = "U" if (delta_kappa>0) else "D"
@@ -965,7 +910,7 @@ if __name__ == "__main__":
                                 save_to_dir = os.path.join("result_pnp", dataset_name, gss_sl1_str)
                                 mkdir_p(save_to_dir)
 
-                                PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, use_gui = False, opt = opt, base_dir=base_dir, iter_num=iter_num)
+                                PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, opt = opt, base_dir=base_dir, iter_num=iter_num)
 
                                 focal_ref = PnP.viewpoint_stack[view_id].fx
                                 delta_focal = delta_focal_ratio*focal_ref
@@ -986,19 +931,25 @@ if __name__ == "__main__":
 
                                 PnP.clean()
 
+
     else:
+
+
+        dataset_selected = [ "drjohnson", "playroom", "train", "truck" ]
 
         with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
             results_dict = pickle.load(fp)
 
-
         for dataset_name in results_dict:
+            if dataset_name not in dataset_selected:
+                continue
 
             for gss_sl1_str in results_dict[dataset_name]:
                 # print("\t\t", gss_sl1_str)
                 for focal_kappa_str in results_dict[dataset_name][gss_sl1_str]:
                     # print("\t\t\t", focal_kappa_str)
                     for view_id in results_dict[dataset_name][gss_sl1_str][focal_kappa_str]:
+
                         print("\n\t", dataset_name, "|", gss_sl1_str, "|", focal_kappa_str, "|", view_id)
 
                         res = results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id]
@@ -1012,6 +963,10 @@ if __name__ == "__main__":
                         err_fx = (fx_est - fx_gt) / fx_gt
                         err_fy = (fy_est - fy_gt) / fy_gt
                         err_kappa = (kappa_est - kappa_gt) / kappa_gt
+
+                        results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id]["error"] = [err_fx, err_kappa]
+                        # results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id]["error"] =  { "fx" : err_fx,   "kappa" : err_kappa }
+
                         '''
                         print result
                         '''
@@ -1025,6 +980,50 @@ if __name__ == "__main__":
                         )
                         format_spec = '{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}'
                         print(format_spec.format(*headers))
+
+
+        """
+        plot result
+        """
+        gss_str_Y, gss_str_N = "gssY_sl1Y", "gssN_sl1N"
+        fU_kU, fU_kD, fD_kU, fD_kD = [], [], [], []
+
+        for dataset_name in dataset_selected:
+            data = results_dict[dataset_name]
+            view_id = 0
+
+            fU_kU.append( [ data[gss_str_Y]['fU_kU'][view_id]["error"],  data[gss_str_N]['fU_kU'][view_id]["error"] ] )
+            fU_kD.append( [ data[gss_str_Y]['fU_kD'][view_id]["error"],  data[gss_str_N]['fU_kD'][view_id]["error"] ] )
+            fD_kU.append( [ data[gss_str_Y]['fD_kU'][view_id]["error"],  data[gss_str_N]['fD_kU'][view_id]["error"] ] )
+            fD_kD.append( [ data[gss_str_Y]['fD_kD'][view_id]["error"],  data[gss_str_N]['fD_kD'][view_id]["error"] ] )
+
+        fU_kU_values =  list( itertools.chain.from_iterable(fU_kU) )
+        fU_kD_values =  list( itertools.chain.from_iterable(fU_kD) )
+        fD_kU_values =  list( itertools.chain.from_iterable(fD_kU) )
+        fD_kD_values =  list( itertools.chain.from_iterable(fD_kD) )
+
+        # rich.print(f"{dataset_selected=}\n{fU_kU=}\n{fU_kD=}\n{fD_kU=}\n{fD_kD=}\n")
+        # rich.print(f"{dataset_selected=}\n{fU_kU_values=}\n{fU_kD_values=}\n{fD_kU_values=}\n{fD_kD_values=}\n")   
+
+        rich.print(f"\n{dataset_selected=}")
+        rich.print(f"{gss_str_Y=}   {gss_str_N=}")
+
+        fU_kU_str = "$f_x \\uparrow$ $\\kappa \\uparrow $"
+        fU_kD_str = "$f_x \\uparrow$ $\\kappa \\downarrow$"
+        fD_kU_str = "$f_x \\downarrow$ $\\kappa \\uparrow$"
+        fD_kD_str = "$f_x \\downarrow$ $\\kappa \\downarrow$"
+
+        print_prefix_str =        [ fU_kU_str,     fU_kD_str,     fD_kU_str,     fD_kD_str    ]
+        for id, vals in enumerate([ fU_kU_values,  fU_kD_values,  fD_kU_values,  fD_kD_values ]):
+            vals = np.array(vals) * 1000
+            pref = print_prefix_str[id]
+            rich.print( pref, " & ", "  &  ".join( f"{x[0]:.2f}\\permil / {x[1]:.2f}\\permil" for x in vals  ),  " \\\\" )
+
+
+
+
+
+
 
 
 
