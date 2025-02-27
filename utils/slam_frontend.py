@@ -792,6 +792,7 @@ class FrontEnd(mp.Process):
 
 
             use_smooth_l1 = (gaussian_scale_t > 0.5)
+            # use_smooth_l1 = False # previously set to false all the time
 
             if use_smooth_l1:
                 """
@@ -801,8 +802,7 @@ class FrontEnd(mp.Process):
                 parameters decided by residual = |f(x) - y|
                 """
                 mask = opacity * rgb_pixel_mask
-                # huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 1.0)
-                huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
+                huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 0.01) # or 0.001. use small enough beta for smooth gradient close to groud-truth
                 loss = huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
 
             else:

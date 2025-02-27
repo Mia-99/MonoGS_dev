@@ -86,29 +86,70 @@ def print_viewpoint_stack(viewpoint_stack, prefix="Camera"):
 
 
 
-def custom_twin_plot(ax, xdata, ydata, yydata, mask, color1 = 'r', color2='b'):
-    # polynomial fitting:  (xdata, ydata) --> (xdata, ygrad)
-    ld = LineDetection(xdata[mask], ydata[mask], deg = 5)
+def plot_loss_focal_kappa (focal_stack, kappa_stack, loss_stack, gt_fx = None, gt_kappa = None, fname = "loss_focal_kappa_iters.pdf"):
+    plt.rcParams['text.usetex'] = True
+    # plt.rcParams['text.latex.preamble'] = [r'\usepackage{sfmath} \boldmath']
+    plt.rcParams["figure.figsize"] = (5, 2.3)
+    plt.rcParams['xtick.labelsize'] = 7
+    plt.rcParams['ytick.labelsize'] = 7
+    plt.rcParams['axes.labelsize'] = 10
+    plt.rcParams['axes.titlesize'] = 10
+    plt.rcParams['axes.edgecolor'] = 'gray'
 
-    # sample polynomial
-    xx, yy = ld.poly.linspace() # ydata
-    xxd, yyd = ld.poly_deriv.linspace() # ygrad
+    color1='mediumblue'
+    color2='crimson'
+    color3='gray'
 
-    # Y LEFT
-    ax.plot(xdata, ydata, '+-', color=color1)
-    # ax.plot(xdata[mask], ydata[mask], 'o', color=color1, mfc='none')
-    # ax.plot(xx, yy, lw=2, color=color1)
+    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
 
-    # Y RIGHT
-    axr = ax.twinx()
-    axr.plot(xdata, yydata, '*', color=color2)
+    iterations = np.arange(0, len(focal_stack))
 
-    return ax, axr
+    ax1.plot (iterations, focal_stack, '-',  color=color1, linewidth=0.5)
+    ax1r = ax1.twinx()
+    ax1r.plot(iterations, kappa_stack, '-',  color=color2, linewidth=0.5)
+
+    ax1.axhline(gt_fx, linestyle="--", color=color1, linewidth=1.0)
+    ax1r.axhline(gt_kappa, linestyle="--", color=color2, linewidth=1.0)
+
+    ax2.plot (iterations, loss_stack,  '-',  color=color3, linewidth=0.5)
+
+    if True:
+
+        ax1.set_xlabel(r"iterations", color='k')
+        ax1.set_ylabel(r"focal $f_x$", color=color1)
+        ax1r.set_ylabel(r"distortion $\kappa$", color=color2)    
+        ax1.spines['left'].set_color (color1)
+        ax1.spines['right'].set_color (color2)
+        # ax1.spines['left'].set_linewidth(2)
+        # ax1.spines['right'].set_linewidth(2)
+        # ax1.spines['bottom'].set_linewidth(2)
+        ax1.tick_params(axis='y', colors=color1)
+        ax1r.tick_params(axis='y', colors=color2)
+
+        # ax1.ticklabel_format(axis='y', style='sci', scilimits=(0,0))        
+        # tight axis
+        ax1.autoscale(enable=True, axis='x', tight=True)
+
+        ax2.set_xlabel(r"iterations", color='k')
+        ax2.set_ylabel(r"loss $L(f_x, \kappa)$", color="k")
+
+        # tight axis
+        ax2.autoscale(enable=True, axis='x', tight=True)
+
+    ax1.tick_params(direction='out', length=2, width=2, colors='k', grid_color='r', grid_alpha=0.5)
+    ax1r.tick_params(direction='out', length=2, width=2, colors='k', grid_color='r', grid_alpha=0.5)
+    ax2.tick_params(direction='out', length=2, width=2, colors='k', grid_color='r', grid_alpha=0.5)
+
+    # tight layout
+    # fig.suptitle(" ")
+    plt.tight_layout(pad=1.0, w_pad=1.5, h_pad=0.0)
+    plt.savefig(fname=fname)
+    plt.close(fig)
 
 
 
 
-def plot_optimisation_steps (xdata1, ydata1, yydata1, xdata2, ydata2, yydata2,
+def plot_loss_space_focal_length (xdata1, ydata1, yydata1, xdata2, ydata2, yydata2,
                              opts, fname = "focal_cost_function.pdf"):
 
     gt_datax1 = opts["ground_truth_x1"]
@@ -128,7 +169,7 @@ def plot_optimisation_steps (xdata1, ydata1, yydata1, xdata2, ydata2, yydata2,
 
     color1='mediumblue'
     color2='chocolate'
-    color3='gray'
+    color3='lightgray'
 
     fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
 
@@ -138,49 +179,29 @@ def plot_optimisation_steps (xdata1, ydata1, yydata1, xdata2, ydata2, yydata2,
     ax2.axhline(0, linestyle="--", color=color3)
 
     # Loss
-    ax1.plot(xdata1, ydata1, '-',  color=color1, label=f"scale_t = {scale_t1:.2f}")
-    ax1.plot(xdata2, ydata2, '-',  color=color2, label=f"scale_t = {scale_t2:.2f}")
+    ax1.scatter(xdata1, ydata1,  s=1, marker='o', color=color1, label=f"scale_t = {scale_t1:.2f}")
+    ax1.scatter(xdata2, ydata2,  s=1, marker='o', color=color2, label=f"scale_t = {scale_t2:.2f}")
     # Loss Gradient
-    ax2.plot(xdata1, yydata1, '-', color=color1, label=f"scale_t = {scale_t1:.2f}")
-    ax2.plot(xdata2, yydata2, '-', color=color2, label=f"scale_t = {scale_t2:.2f}")
+    ax2.scatter(xdata1, yydata1, s=1, marker='o', color=color1, label=f"scale_t = {scale_t1:.2f}")
+    ax2.scatter(xdata2, yydata2, s=1, marker='o', color=color2, label=f"scale_t = {scale_t2:.2f}")
 
     if True:
 
         ax1.set_title(f"loss", fontweight='bold')
         ax1.set_xlabel(r"normalized focal length $f$", color='k')
         ax1.set_ylabel(r"$L(f)$", color="k")
-        # ax1r.set_ylabel(r"$\nabla L(f)$", color=color2)    
-        # ax1.spines['left'].set_color (color1)
-        # ax1.spines['right'].set_color (color2)
-        # ax1.spines['left'].set_linewidth(2)
-        # ax1.spines['right'].set_linewidth(2)
-        # ax1.spines['bottom'].set_linewidth(2)
-        # ax1.tick_params(axis='y', colors=color1)
-        # ax1r.tick_params(axis='y', colors=color2)
 
-        # ax1.ticklabel_format(axis='y', style='sci', scilimits=(0,0))        
         # tight axis
         ax1.autoscale(enable=True, axis='x', tight=True)
         ax1.autoscale(enable=True, axis='y', tight=False)
 
-
-
         ax2.set_title(f"loss gradient", fontweight='bold')
         ax2.set_xlabel(r"normalized focal length $f$", color='k')
         ax2.set_ylabel(r"$\nabla L(f)$", color="k")
-        # ax2r.set_ylabel(r"$\nabla L(f)$", color=color2)    
-        # ax2.spines['left'].set_color (color1)
-        # ax2.spines['right'].set_color (color2)
-        # ax2.spines['left'].set_linewidth(2)
-        # ax2.spines['right'].set_linewidth(2)
-        # ax2.spines['bottom'].set_linewidth(2)
-        # ax2.tick_params(axis='y', colors=color1)
-        # ax2r.tick_params(axis='y', colors=color2)
 
         # tight axis
         ax2.autoscale(enable=True, axis='x', tight=True)
         ax2.autoscale(enable=True, axis='y', tight=False)
-
 
     ax1.tick_params(direction='out', length=2, width=2, colors='k', grid_color='r', grid_alpha=0.5)
     ax2.tick_params(direction='out', length=2, width=2, colors='k', grid_color='r', grid_alpha=0.5)
@@ -209,6 +230,12 @@ class CameraResectioning(mp.Process):
         self.gaussians = gaussians   # fixed in camera resectioning
         self.pipe = pipe
         self.opt = opt
+
+        '''
+        At initialization, if both kappa and focal are optimzied at the same time, the value of kappa fluctuates.
+        THUS, it is better to optimize focal ONLY for some iterations, before JOINTLY optimizing focal and kappa 
+        '''
+        self.start_kappa_optimization_at_iter = 50  # optimize focal ONLY before this iteration
 
         self.gaussians.optimizer = None # Do NOT optimize Gaussian
 
@@ -378,9 +405,11 @@ class CameraResectioning(mp.Process):
     def optimize (self, view_id = 0, max_iters = 1000, set_focal_error=None, set_kappa_error=None, update_pose=False, update_calibration = True, scale_space_iters=-1, use_smooth_l1=True):
         assert ( view_id >= 0 and view_id < len(self.viewpoint_stack) ), f"view_id={view_id} out of range!"
         viewpoint = self.viewpoint_stack[view_id]
-        if viewpoint.original_image is None:            
+        if viewpoint.original_image is None:     
+            print("viewpoint.original_image is None. Render these images first.")       
             return
-        
+        self.debug = False
+
         _, h, w = viewpoint.original_image.shape
         self.gaussian_scale_t = 0.01 * max(w,h)  # if self.gaussian_scale_t is None else self.gaussian_scale_t
         self.focal_reference = np.sqrt(h*h + w*w)/2 # if self.focal_reference is None else self.focal_reference
@@ -411,7 +440,6 @@ class CameraResectioning(mp.Process):
             rich.print(f"[bold red][Notice]: old kappa {kappa - noise_kappa} ====> new kappa {kappa}.  Noise added {noise_kappa}  [/bold red]")
 
 
-
         sfm_gui.Log("start Camera Resectioning Optimization\n", tag="SFM")        
 
         self.focal_stack, self.focal_grad_stack, self.kappa_stack, self.kappa_grad_stack, self.loss_stack = [], [], [], [], []
@@ -432,8 +460,8 @@ class CameraResectioning(mp.Process):
             if (iteration == 500):
                 lr = self.calibration_optimizer.estimate_step_size()
                 self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-                self.calibration_optimizer.update_focal_learning_rate (lr = 0.01)
-                self.calibration_optimizer.update_kappa_learning_rate (lr = 0.01)
+                self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
+                self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
             
             # FORWARD
             loss = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space, use_smooth_l1 = (use_scale_space and use_smooth_l1), use_SSIM = False )            
@@ -453,7 +481,7 @@ class CameraResectioning(mp.Process):
                 if update_calibration:
                     # rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
                     self.calibration_optimizer.focal_step()
-                    if self.allow_lens_distortion:
+                    if self.allow_lens_distortion and (iteration >= self.start_kappa_optimization_at_iter):
                         rich.print(f"[bold red]After loss.backward: [/bold red]{viewpoint.cam_kappa_delta.grad=}")
                         self.calibration_optimizer.kappa_step()
                 # pose step
@@ -467,7 +495,6 @@ class CameraResectioning(mp.Process):
 
         sfm_gui.Log(f"optimization complete.\n", tag="SFM")
         torch.cuda.synchronize()
-        self.close()
 
         results = {
             "fx" : viewpoint.fx,
@@ -476,10 +503,10 @@ class CameraResectioning(mp.Process):
             "gt_fx" : viewpoint.fx_init,
             "gt_fy" : viewpoint.fy_init,
             "gt_kappa" : viewpoint.kappa_init,
-            "R" : viewpoint.R,
-            "T" : viewpoint.T,
-            "gt_R" : viewpoint.R_gt,
-            "gt_T" : viewpoint.T_gt,
+            "R" : viewpoint.R.detach().cpu().numpy(),
+            "T" : viewpoint.T.detach().cpu().numpy(),
+            "gt_R" : viewpoint.R_gt.detach().cpu().numpy(),
+            "gt_T" : viewpoint.T_gt.detach().cpu().numpy(),
             "focal_stack" : self.focal_stack,
             "focal_grad_stack" : self.focal_grad_stack,
             "kappa_stack" : self.kappa_stack,
@@ -493,12 +520,12 @@ class CameraResectioning(mp.Process):
         return results
 
 
-    def show_rendered_images (self, view_id = None, save_to_dir=None, annotate=True,  use_gt_image=False, resize_to_width=None):
+    def show_rendered_images (self, view_id = None, save_to_dir=None, image_name=None, annotate=True,  use_gt_image=False, resize_to_width=None):
         # plt.rcParams["font.family"] = "Arial"
         # plt.rcParams["font.family"] = "Times New Roman"
         csfont = {'fontname':'Times New Roman'}
-        for id, viewpoint in enumerate(self.viewpoint_stack):
-            if (view_id is not None) and id != view_id:
+        for idx, viewpoint in enumerate(self.viewpoint_stack):
+            if (view_id is not None) and idx != view_id:
                 continue
 
             if use_gt_image:
@@ -555,12 +582,12 @@ class CameraResectioning(mp.Process):
             fig, ax, _ = annotate_image_by_table(rgb, cmap=None, mytext = mytext)
 
             if save_to_dir is not None:
-                post_str = f"_f{viewpoint.fx_init:.2f}_k{viewpoint.kappa_init:.6f}"
-                plt.savefig(os.path.join(save_to_dir, "view"+str(id)+post_str+'.png'), bbox_inches='tight', pad_inches=0)
+                image_name = "view"+str(idx)+f"_f{viewpoint.fx_init:.2f}_k{viewpoint.kappa_init:.6f}" if image_name is None else image_name
+                plt.savefig(os.path.join(save_to_dir, image_name+'.png'), bbox_inches='tight', pad_inches=0)
                 plt.close()
                 time.sleep(0.01)
 
-                with open( os.path.join(save_to_dir, "view"+str(id)+post_str+'.txt'), "w" ) as myfile:
+                with open( os.path.join(save_to_dir, image_name+'.txt'), "w" ) as myfile:
                     myfile.write(format_spec.format(*headers))
 
 
@@ -608,9 +635,8 @@ class CameraResectioning(mp.Process):
             - SmoothL1Loss
             parameters decided by residual = |f(x) - y|
             """
-            beta = 1.0 if self.debug else 0.1
+            beta = 0.1 if self.debug else 0.01
             huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = beta)
-            # huber_loss_function = torch.nn.HuberLoss(reduction = 'mean', delta = 1.0)
             Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
             loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
 
@@ -816,8 +842,8 @@ if __name__ == "__main__":
         PnP.require_calibration = True
         PnP.allow_lens_distortion = True
 
-        results1 = PnP.sample_cost_space(view_id = 0, num_samples = 100, use_scale_space = False)
-        results2 = PnP.sample_cost_space(view_id = 0, num_samples = 100, use_scale_space = True)
+        results1 = PnP.sample_cost_space(view_id = 0, num_samples = 200, use_scale_space = False)
+        results2 = PnP.sample_cost_space(view_id = 0, num_samples = 200, use_scale_space = True)
 
         focal_stack1, focal_grad_stack1, gaussian_scale_t1, loss_stack1 = results1["focal_stack"], results1["focal_grad_stack"], results1["gaussian_scale_t"], results1["loss_stack"]
         focal_stack2, focal_grad_stack2, gaussian_scale_t2, loss_stack2 = results2["focal_stack"], results2["focal_grad_stack"], results2["gaussian_scale_t"], results2["loss_stack"]
@@ -829,7 +855,7 @@ if __name__ == "__main__":
             "gaussian_scale_t2" : gaussian_scale_t2,
             "global_title" : r"$\nabla L(f) = 2 a f + b $, with Huber loss $\delta =1.0$"
         }
-        plot_optimisation_steps (focal_stack1, loss_stack1, focal_grad_stack1,
+        plot_loss_space_focal_length (focal_stack1, loss_stack1, focal_grad_stack1,
                                  focal_stack2, loss_stack2, focal_grad_stack2,
                                  opts=opts,
                                  fname = "focal_cost_function.pdf")
@@ -850,7 +876,7 @@ if __name__ == "__main__":
     """
     if True:
 
-        max_iters = 2000
+        max_iters = 1000 # 2000
         dataset_root_dir = "/hdd/3DGS"
 
         for dataset_name in [ "drjohnson", "playroom", "train", "truck",  "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "bicycle"  ]:
@@ -891,8 +917,8 @@ if __name__ == "__main__":
                     """
                     different calibration parameters:
                     """
-                    for delta_focal_ratio in [-0.4, 0.7]:
-                        for delta_kappa in [-0.35, 0.35]:
+                    for delta_focal_ratio in [-0.4, 1.0]:
+                        for delta_kappa in [-0.3, 0.3]:
 
                             focal_str = "U" if (delta_focal_ratio>0) else "D"
                             kappa_str = "U" if (delta_kappa>0) else "D"
@@ -903,6 +929,8 @@ if __name__ == "__main__":
                             views
                             '''
                             for view_id in [0]:
+
+                                image_name = "view" + str(view_id) + "_" + focal_kappa_str
 
                                 PnP = None
                                 torch.cuda.empty_cache()
@@ -919,11 +947,64 @@ if __name__ == "__main__":
 
                                 results = PnP.optimize (view_id, max_iters = max_iters, set_focal_error=-delta_focal, set_kappa_error=-delta_kappa,
                                             update_pose=False, update_calibration=True, scale_space_iters=scale_space_iters, use_smooth_l1=use_smooth_l1)
-                                
-                                PnP.show_rendered_images(view_id, save_to_dir, annotate=False, use_gt_image=True, resize_to_width=640)
+                        
+                                PnP.show_rendered_images(view_id, save_to_dir, image_name=image_name, annotate=False, use_gt_image=True, resize_to_width=640)
+
+                                """
+                                Evaluation. put it in a function taking results as the argument?
+                                """
+                                fx_est, fy_est, kappa_est = results["fx"], results["fy"], results["kappa"]
+                                fx_gt, fy_gt, kappa_gt = results["gt_fx"], results["gt_fy"], results["gt_kappa"]
+                                aspect_ratio = fy_gt / fx_gt
+                                fx_init, fy_init, kappa_init = results["focal_stack"][0], results["focal_stack"][0]*aspect_ratio, results["kappa_stack"][0]
+
+                                # relative error. err_fx = err_fy, since fy = aspect_ratio*fx
+                                err_fx = (fx_est - fx_gt) / fx_gt
+                                err_fy = (fy_est - fy_gt) / fy_gt
+                                err_kappa = (kappa_est - kappa_gt) / kappa_gt
+
+                                results["error"] = [err_fx, err_kappa]  # { "fx" : err_fx,   "kappa" : err_kappa }
+                                results["succeed"] = 1 if ( abs(err_fx) < 0.05 and abs(err_kappa) < 0.05 ) else 0
 
                                 results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id] = results
 
+                                '''
+                                print result
+                                '''
+                                headers = (
+                                    '*', 'fx', 'fy', 'k', 
+                                    "gt",   f'{fx_gt:.2f}',   f'{fy_gt:.2f}',   f'{kappa_gt:.5f}',
+                                    "init", f'{fx_init:.2f}', f'{fy_init:.2f}', f'{kappa_init:.5f}',
+                                    "est",  f'{fx_est:.2f}',  f'{fy_est:.2f}',  f'{kappa_est:.5f}',
+                                    "error(f)",f'{err_fx:.5f}',  f'{err_fy:.5f}',  f'{err_kappa:.5f}',
+                                    "error(%)",f'{err_fx:.3%}',  f'{err_fy:.3%}',  f'{err_kappa:.3%}'
+                                )
+                                format_spec = '{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}'
+                                print(format_spec.format(*headers))
+                                with open( os.path.join(save_to_dir, image_name+'.txt'), "w" ) as myfile:
+                                    myfile.write(format_spec.format(*headers))
+
+                                '''
+                                plot figure
+                                '''
+                                plot_loss_focal_kappa ( focal_stack=results["focal_stack"].copy()[:250],
+                                                        kappa_stack=results["kappa_stack"].copy()[:250],
+                                                        loss_stack=results["loss_stack"].copy()[:250],
+                                                        gt_fx=fx_gt, gt_kappa=kappa_gt,
+                                                        fname = os.path.join(save_to_dir, image_name+'_it250.pdf')
+                                                       )
+                                plot_loss_focal_kappa ( focal_stack=results["focal_stack"].copy()[:500],
+                                                        kappa_stack=results["kappa_stack"].copy()[:500],
+                                                        loss_stack=results["loss_stack"].copy()[:500],
+                                                        gt_fx=fx_gt, gt_kappa=kappa_gt,
+                                                        fname = os.path.join(save_to_dir, image_name+'_it500.pdf')
+                                                       )
+                                plot_loss_focal_kappa ( focal_stack=results["focal_stack"].copy(),
+                                                        kappa_stack=results["kappa_stack"].copy(),
+                                                        loss_stack=results["loss_stack"].copy(),
+                                                        gt_fx=fx_gt, gt_kappa=kappa_gt,
+                                                        fname = os.path.join(save_to_dir, image_name+'.pdf')
+                                                       )
 
                                 with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'wb') as fp:
                                     pickle.dump(results_dict, fp)
@@ -939,48 +1020,6 @@ if __name__ == "__main__":
 
         with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
             results_dict = pickle.load(fp)
-
-        for dataset_name in results_dict:
-            if dataset_name not in dataset_selected:
-                continue
-
-            for gss_sl1_str in results_dict[dataset_name]:
-                # print("\t\t", gss_sl1_str)
-                for focal_kappa_str in results_dict[dataset_name][gss_sl1_str]:
-                    # print("\t\t\t", focal_kappa_str)
-                    for view_id in results_dict[dataset_name][gss_sl1_str][focal_kappa_str]:
-
-                        print("\n\t", dataset_name, "|", gss_sl1_str, "|", focal_kappa_str, "|", view_id)
-
-                        res = results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id]
-                        
-                        fx_est, fy_est, kappa_est = res["fx"], res["fy"], res["kappa"]
-                        fx_gt, fy_gt, kappa_gt = res["gt_fx"], res["gt_fy"], res["gt_kappa"]
-                        aspect_ratio = fy_gt / fx_gt
-                        fx_init, fy_init, kappa_init = res["focal_stack"][0], res["focal_stack"][0]*aspect_ratio, res["kappa_stack"][0]
-
-                        # relative error
-                        err_fx = (fx_est - fx_gt) / fx_gt
-                        err_fy = (fy_est - fy_gt) / fy_gt
-                        err_kappa = (kappa_est - kappa_gt) / kappa_gt
-
-                        results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id]["error"] = [err_fx, err_kappa]
-                        # results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id]["error"] =  { "fx" : err_fx,   "kappa" : err_kappa }
-
-                        '''
-                        print result
-                        '''
-                        headers = (
-                            '*', 'fx', 'fy', 'k', 
-                            "gt",   f'{fx_gt:.2f}',   f'{fy_gt:.2f}',   f'{kappa_gt:.5f}',
-                            "init", f'{fx_init:.2f}', f'{fy_init:.2f}', f'{kappa_init:.5f}',
-                            "est",  f'{fx_est:.2f}',  f'{fy_est:.2f}',  f'{kappa_est:.5f}',
-                            "error(f)",f'{err_fx:.5f}',  f'{err_fy:.5f}',  f'{err_kappa:.5f}',
-                            "error(%)",f'{err_fx:.3%}',  f'{err_fy:.3%}',  f'{err_kappa:.3%}'
-                        )
-                        format_spec = '{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}\n{:15}  {:>10}  {:>10}  {:>10}'
-                        print(format_spec.format(*headers))
-
 
         """
         plot result
@@ -1018,12 +1057,3 @@ if __name__ == "__main__":
             vals = np.array(vals) * 1000
             pref = print_prefix_str[id]
             rich.print( pref, " & ", "  &  ".join( f"{x[0]:.2f}\\permil / {x[1]:.2f}\\permil" for x in vals  ),  " \\\\" )
-
-
-
-
-
-
-
-
-
