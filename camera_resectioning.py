@@ -279,6 +279,8 @@ class CameraResectioning(mp.Process):
 
         viewpoint_stack = assemble_3DGS_cameras_from_3DGS_JSON_file (camera_file_path)
 
+        print(f"Loaded 3DGS data:\n\tnumber of cameras: {len(viewpoint_stack)}\n\tnumber of Gaussians: {len(gaussians.get_xyz)}")
+
         return  CameraResectioning(viewpoint_stack = viewpoint_stack, gaussians = gaussians, pipe = pipe, opt = opt)
 
 
@@ -456,8 +458,14 @@ class CameraResectioning(mp.Process):
             """
             if (iteration == scale_space_iters):
                 use_scale_space = False
-            
-            if (iteration == 500):
+
+            if (iteration == 200):
+                lr = self.calibration_optimizer.estimate_step_size()
+                self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+                self.calibration_optimizer.update_focal_learning_rate (lr = 0.02)
+                self.calibration_optimizer.update_kappa_learning_rate (lr = 0.01)
+
+            if (iteration == 400):
                 lr = self.calibration_optimizer.estimate_step_size()
                 self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
                 self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
@@ -635,7 +643,7 @@ class CameraResectioning(mp.Process):
             - SmoothL1Loss
             parameters decided by residual = |f(x) - y|
             """
-            beta = 0.1 if self.debug else 0.01
+            beta = 0.1 if self.debug else 0.001
             huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = beta)
             Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
             loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
@@ -876,19 +884,19 @@ if __name__ == "__main__":
     """
     if True:
 
-        max_iters = 1000 # 2000
+        max_iters = 500
         dataset_root_dir = "/hdd/3DGS"
 
-        for dataset_name in [ "drjohnson", "playroom", "train", "truck",  "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "bicycle"  ]:
-            base_dir = os.path.join(dataset_root_dir, dataset_name)
-            save_to_dir = os.path.join("result_pnp", dataset_name)
-            mkdir_p(save_to_dir)
-            PnP = None
-            torch.cuda.empty_cache()
-            PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, opt = opt, base_dir=base_dir, iter_num=iter_num)
-            PnP.set_viewpoint_calibration(view_id=0, delta_focal=0.0, delta_kappa=0.0)
-            PnP.show_rendered_images(view_id=0, save_to_dir=save_to_dir, annotate=False, use_gt_image=True, resize_to_width=640)
-
+        if False:
+            for dataset_name in [ "drjohnson", "playroom", "train", "truck",  "bonsai", "counter", "flowers", "garden", "kitchen", "room", "stump", "treehill", "bicycle"  ]:
+                base_dir = os.path.join(dataset_root_dir, dataset_name)
+                save_to_dir = os.path.join("result_pnp", dataset_name)
+                mkdir_p(save_to_dir)
+                PnP = None
+                torch.cuda.empty_cache()
+                PnP = CameraResectioning.init_from_3DGS_output_dir(pipe = pipe, opt = opt, base_dir=base_dir, iter_num=iter_num)
+                PnP.set_viewpoint_calibration(view_id=0, delta_focal=0.0, delta_kappa=0.0)
+                PnP.show_rendered_images(view_id=0, save_to_dir=save_to_dir, annotate=False, use_gt_image=True, resize_to_width=640)
 
         try:
             with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
@@ -898,7 +906,7 @@ if __name__ == "__main__":
 
 
         for dataset_name in [ "drjohnson", "playroom", "train", "truck" ]:
-        # for dataset_name in [  "drjohnson" ]:
+        # for dataset_name in [  "drjohnson", "truck" ]:
 
             base_dir = os.path.join(dataset_root_dir, dataset_name)
 
@@ -906,7 +914,7 @@ if __name__ == "__main__":
             """
             different optimization strategies:
             """
-            for scale_space_iters in [-1, 500]:
+            for scale_space_iters in [-1, 200]:
                 for use_smooth_l1 in [True, False]:
 
                     gss_str = 'Y' if (scale_space_iters > 0) else 'N'
@@ -917,7 +925,7 @@ if __name__ == "__main__":
                     """
                     different calibration parameters:
                     """
-                    for delta_focal_ratio in [-0.4, 1.0]:
+                    for delta_focal_ratio in [-0.333, 1.0]:
                         for delta_kappa in [-0.3, 0.3]:
 
                             focal_str = "U" if (delta_focal_ratio>0) else "D"
@@ -928,7 +936,7 @@ if __name__ == "__main__":
                             '''
                             views
                             '''
-                            for view_id in [0]:
+                            for view_id in np.arange(0, 200, 10).tolist():
 
                                 image_name = "view" + str(view_id) + "_" + focal_kappa_str
 
@@ -964,7 +972,7 @@ if __name__ == "__main__":
                                 err_kappa = (kappa_est - kappa_gt) / kappa_gt
 
                                 results["error"] = [err_fx, err_kappa]  # { "fx" : err_fx,   "kappa" : err_kappa }
-                                results["succeed"] = 1 if ( abs(err_fx) < 0.05 and abs(err_kappa) < 0.05 ) else 0
+                                results["succeed"] = 1 if ( abs(err_fx) < 0.01 and abs(err_kappa) < 0.01 ) else 0
 
                                 results_dict[dataset_name][gss_sl1_str][focal_kappa_str][view_id] = results
 
@@ -1024,7 +1032,7 @@ if __name__ == "__main__":
         """
         plot result
         """
-        gss_str_Y, gss_str_N = "gssY_sl1Y", "gssN_sl1N"
+        gss_str_Y, gss_str_N = "gssY_sl1N", "gssN_sl1N"
         fU_kU, fU_kD, fD_kU, fD_kD = [], [], [], []
 
         for dataset_name in dataset_selected:

@@ -228,7 +228,7 @@ class SFM(mp.Process):
             - SmoothL1Loss
             parameters decided by residual = |f(x) - y|
             """
-            huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 0.01) # or 0.001, use small enough beta for smooth gradient close to groud-truth
+            huber_loss_function = torch.nn.SmoothL1Loss(reduction = 'mean', beta = 0.001) # or 0.001, use small enough beta for smooth gradient close to groud-truth
             Ll1 =  huber_loss_function(image_scale_t*mask, gt_image_scale_t*mask)
             loss += (1.0 - self.opt.lambda_dssim) * Ll1 if use_SSIM else Ll1
 
