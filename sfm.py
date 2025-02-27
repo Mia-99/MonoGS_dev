@@ -258,7 +258,7 @@ class SFM(mp.Process):
 
         for viewpoint in self.viewpoint_stack:
 
-            view_loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view (viewpoint, use_scale_space = use_scale_space, use_SSIM = use_SSIM)
+            view_loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view (viewpoint, use_scale_space = use_scale_space, use_smooth_l1 = False, use_SSIM = use_SSIM)
 
             loss += view_loss
 
@@ -298,7 +298,7 @@ class SFM(mp.Process):
         for viewpoint in self.viewpoint_stack:
 
             # FORWARD
-            loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )            
+            loss, viewspace_point_tensor, visibility_filter, radii, opacity, n_touched = self.compute_loss_one_view ( viewpoint, use_scale_space = use_scale_space, use_smooth_l1 = False, use_SSIM = use_ssim_loss )            
 
             # BACKWARD
             loss.backward()
@@ -406,10 +406,16 @@ class SFM(mp.Process):
         progress_bar.close()
 
 
-    def run_phase2 (self, max_iters = 500, update_Gaussian = True, update_pose = False, update_calibration = False, use_scale_space = False):
+    def run_phase2 (self, max_iters = 500, update_Gaussian = False, update_pose = False, update_calibration = False, use_scale_space = False):
         '''
         BA (Gaussian, pose, calibration)
         '''
+        self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
+        self.pose_optimizer.zero_grad()
+        self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+        self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
+        self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
+        self.calibration_optimizer.zero_grad()
         progress_bar = tqdm(range(1, max_iters+1), desc="Phase2: Training progress")
         cam_cnt = 0
         for iteration in range(0, max_iters):
@@ -474,7 +480,6 @@ class SFM(mp.Process):
 
         if self.calibration_optimizer is None:            
             self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-            self.calibration_optimizer.update_focal_learning_rate (lr = 0.03) # 0.1 also works
             self.calib_safe_guard = False
 
         if self.pose_optimizer is None:
@@ -506,7 +511,7 @@ class SFM(mp.Process):
             rich.print(f"[bold red][Notice]: old fx {focal - noise_fx} ====> new fx {focal}.  Noise added {noise_fx}  [/bold red]")
 
         # SelfCalibrating Bundle adjustment
-        self.run_phase2(max_iters = phase2_CaliDBA_GSS_iter, update_Gaussian = True, update_pose = True, update_calibration = True)
+        self.run_phase2(max_iters = phase2_CaliDBA_GSS_iter, update_Gaussian = True, update_pose = True, update_calibration = True, use_scale_space = True) # better not do this
         self.run_phase2(max_iters = phase2_CaliDBA_iter, update_Gaussian = True, update_pose = True, update_calibration = True, use_scale_space = False)
         
         # refinement using SSIM 
