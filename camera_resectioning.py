@@ -882,7 +882,7 @@ if __name__ == "__main__":
         wget https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/pretrained/models.zip
 
     """
-    if True:
+    if False:
 
         max_iters = 500
         dataset_root_dir = "/hdd/3DGS"
@@ -1033,35 +1033,86 @@ if __name__ == "__main__":
         plot result
         """
         gss_str_Y, gss_str_N = "gssY_sl1N", "gssN_sl1N"
-        fU_kU, fU_kD, fD_kU, fD_kD = [], [], [], []
 
+        view_id_set = np.arange(0, 200, 10).tolist()
+
+
+        fU_kU_dict, fU_kD_dict, fD_kU_dict, fD_kD_dict = {}, {}, {}, {}
+        for view_id in view_id_set:
+            fU_kU, fU_kD, fD_kU, fD_kD = [], [], [], []
+            for dataset_name in dataset_selected:
+                data = results_dict[dataset_name]
+                # [fx, kappa] relative error
+                fU_kU.append( [ data[gss_str_Y]['fU_kU'][view_id]["error"],  data[gss_str_N]['fU_kU'][view_id]["error"] ] )
+                fU_kD.append( [ data[gss_str_Y]['fU_kD'][view_id]["error"],  data[gss_str_N]['fU_kD'][view_id]["error"] ] )
+                fD_kU.append( [ data[gss_str_Y]['fD_kU'][view_id]["error"],  data[gss_str_N]['fD_kU'][view_id]["error"] ] )
+                fD_kD.append( [ data[gss_str_Y]['fD_kD'][view_id]["error"],  data[gss_str_N]['fD_kD'][view_id]["error"] ] )
+            fU_kU_dict[view_id] = fU_kU
+            fU_kD_dict[view_id] = fU_kD
+            fD_kU_dict[view_id] = fD_kU
+            fD_kD_dict[view_id] = fD_kD
+
+
+        fU_kU_sr, fU_kD_sr, fD_kU_sr, fD_kD_sr = [], [], [], []
         for dataset_name in dataset_selected:
             data = results_dict[dataset_name]
-            view_id = 0
+            # succeed
+            sr_gssY, sr_gssN = 0, 0
+            for view_id, result in data[gss_str_Y]['fU_kU'].items():
+                sr_gssY += result["succeed"]
+                sr_gssN += result["succeed"]
+            fU_kU_sr.append( [ sr_gssY, sr_gssN ] )
 
-            fU_kU.append( [ data[gss_str_Y]['fU_kU'][view_id]["error"],  data[gss_str_N]['fU_kU'][view_id]["error"] ] )
-            fU_kD.append( [ data[gss_str_Y]['fU_kD'][view_id]["error"],  data[gss_str_N]['fU_kD'][view_id]["error"] ] )
-            fD_kU.append( [ data[gss_str_Y]['fD_kU'][view_id]["error"],  data[gss_str_N]['fD_kU'][view_id]["error"] ] )
-            fD_kD.append( [ data[gss_str_Y]['fD_kD'][view_id]["error"],  data[gss_str_N]['fD_kD'][view_id]["error"] ] )
+            sr_gssY, sr_gssN = 0, 0
+            for view_id, result in data[gss_str_Y]['fU_kD'].items():
+                sr_gssY += result["succeed"]
+                sr_gssN += result["succeed"]
+            fU_kD_sr.append( [ sr_gssY, sr_gssN ] )
 
-        fU_kU_values =  list( itertools.chain.from_iterable(fU_kU) )
-        fU_kD_values =  list( itertools.chain.from_iterable(fU_kD) )
-        fD_kU_values =  list( itertools.chain.from_iterable(fD_kU) )
-        fD_kD_values =  list( itertools.chain.from_iterable(fD_kD) )
+            sr_gssY, sr_gssN = 0, 0
+            for view_id, result in data[gss_str_Y]['fD_kU'].items():
+                sr_gssY += result["succeed"]
+                sr_gssN += result["succeed"]
+            fD_kU_sr.append( [ sr_gssY, sr_gssN ] )
 
-        # rich.print(f"{dataset_selected=}\n{fU_kU=}\n{fU_kD=}\n{fD_kU=}\n{fD_kD=}\n")
-        # rich.print(f"{dataset_selected=}\n{fU_kU_values=}\n{fU_kD_values=}\n{fD_kU_values=}\n{fD_kD_values=}\n")   
+            sr_gssY, sr_gssN = 0, 0
+            for view_id, result in data[gss_str_Y]['fD_kD'].items():
+                sr_gssY += result["succeed"]
+                sr_gssN += result["succeed"]
+            fD_kD_sr.append( [ sr_gssY, sr_gssN ] )
 
-        rich.print(f"\n{dataset_selected=}")
-        rich.print(f"{gss_str_Y=}   {gss_str_N=}")
 
         fU_kU_str = "$f_x \\uparrow$ $\\kappa \\uparrow $"
         fU_kD_str = "$f_x \\uparrow$ $\\kappa \\downarrow$"
         fD_kU_str = "$f_x \\downarrow$ $\\kappa \\uparrow$"
         fD_kD_str = "$f_x \\downarrow$ $\\kappa \\downarrow$"
-
         print_prefix_str =        [ fU_kU_str,     fU_kD_str,     fD_kU_str,     fD_kD_str    ]
-        for id, vals in enumerate([ fU_kU_values,  fU_kD_values,  fD_kU_values,  fD_kD_values ]):
-            vals = np.array(vals) * 1000
+
+      
+        for view_id in view_id_set:
+            fU_kU = fU_kU_dict[view_id]
+            fU_kD = fU_kD_dict[view_id]
+            fD_kU = fD_kU_dict[view_id]
+            fD_kD = fD_kD_dict[view_id]
+            
+            rich.print(f"\n{dataset_selected=}")
+            rich.print(f"{gss_str_Y=} ([bold red]fx / kappa[/bold red])  [bold red]&[/bold red]  {gss_str_N=} ([bold red]fx / kappa[/bold red])")
+            rich.print(f"{view_id=}")
+
+            for id, vals in enumerate([ fU_kU,  fU_kD,  fD_kU,  fD_kD ]):
+                vals_v = list( itertools.chain.from_iterable(vals) )              
+                pref = print_prefix_str[id]
+                rich.print( pref, " & ", "  &  ".join( f"{x[0]:.2f}\\permil / {x[1]:.2f}\\permil" for x in np.array(vals_v) * 1000  ),  " \\\\" )
+
+
+
+        rich.print(f"\n{dataset_selected=}")
+        rich.print(f"{gss_str_Y=} ([bold red]success-rate[/bold red])  [bold red]&[/bold red]  {gss_str_N=} ([bold red]success-rate[/bold red])")
+
+        for id, vals in enumerate([ fU_kU_sr,  fU_kD_sr,  fD_kU_sr,  fD_kD_sr ]):
             pref = print_prefix_str[id]
-            rich.print( pref, " & ", "  &  ".join( f"{x[0]:.2f}\\permil / {x[1]:.2f}\\permil" for x in vals  ),  " \\\\" )
+            vals_v = list( itertools.chain.from_iterable(vals) )
+            rich.print( pref, " & ", "  &  ".join( f"{(x/len(view_id_set)):.2f}" for x in vals_v  ),  " \\\\" )
+
+
+
