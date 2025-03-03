@@ -235,7 +235,7 @@ class CameraResectioning(mp.Process):
         At initialization, if both kappa and focal are optimzied at the same time, the value of kappa fluctuates.
         THUS, it is better to optimize focal ONLY for some iterations, before JOINTLY optimizing focal and kappa 
         '''
-        self.start_kappa_optimization_at_iter = 50  # optimize focal ONLY before this iteration
+        self.start_kappa_optimization_at_iter = 20  # optimize focal ONLY before this iteration
 
         self.gaussians.optimizer = None # Do NOT optimize Gaussian
 
@@ -459,13 +459,13 @@ class CameraResectioning(mp.Process):
             if (iteration == scale_space_iters):
                 use_scale_space = False
 
-            if (iteration == 200):
+            if (iteration == 50):
                 lr = self.calibration_optimizer.estimate_step_size()
                 self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
                 self.calibration_optimizer.update_focal_learning_rate (lr = 0.02)
                 self.calibration_optimizer.update_kappa_learning_rate (lr = 0.01)
 
-            if (iteration == 400):
+            if (iteration == 150):
                 lr = self.calibration_optimizer.estimate_step_size()
                 self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
                 self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
@@ -882,9 +882,27 @@ if __name__ == "__main__":
         wget https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/pretrained/models.zip
 
     """
-    if False:
+    view_id_set = np.arange(0, 200, 5).tolist()
+    dataset_selected = [ "drjohnson", "playroom", "train", "truck" ]
+    # dataset_selected = [  "drjohnson", "truck" ]
 
-        max_iters = 500
+
+    def eval_iteration_convergence (focal_stack, kappa_stack, gt_fx, gt_kappa):
+        rle_focal = abs( ( np.array(focal_stack) - gt_fx ) / gt_fx )
+        rle_kappa = abs( ( np.array(kappa_stack) - gt_kappa) / gt_kappa )
+
+        success = ( rle_focal[-1] < 0.01 and rle_kappa[-1] < 0.01 )
+
+        for iter in range(len(rle_focal)):
+            if rle_focal[iter] < 0.01 and rle_kappa[iter] < 0.01:
+                return success, iter
+        
+        return success, len(rle_focal)
+
+
+    if True:
+
+        max_iters = 300
         dataset_root_dir = "/hdd/3DGS"
 
         if False:
@@ -905,8 +923,7 @@ if __name__ == "__main__":
             results_dict = {}
 
 
-        for dataset_name in [ "drjohnson", "playroom", "train", "truck" ]:
-        # for dataset_name in [  "drjohnson", "truck" ]:
+        for dataset_name in dataset_selected:
 
             base_dir = os.path.join(dataset_root_dir, dataset_name)
 
@@ -914,7 +931,7 @@ if __name__ == "__main__":
             """
             different optimization strategies:
             """
-            for scale_space_iters in [-1, 200]:
+            for scale_space_iters in [-1, 100]:
                 for use_smooth_l1 in [True, False]:
 
                     gss_str = 'Y' if (scale_space_iters > 0) else 'N'
@@ -936,7 +953,7 @@ if __name__ == "__main__":
                             '''
                             views
                             '''
-                            for view_id in np.arange(0, 200, 10).tolist():
+                            for view_id in view_id_set:
 
                                 image_name = "view" + str(view_id) + "_" + focal_kappa_str
 
@@ -1021,21 +1038,15 @@ if __name__ == "__main__":
                                 PnP.clean()
 
 
-    else:
-
-
-        dataset_selected = [ "drjohnson", "playroom", "train", "truck" ]
+    else:        
 
         with open(os.path.join( "result_pnp", 'results_dict.pkl'), 'rb') as fp:
             results_dict = pickle.load(fp)
 
         """
-        plot result
+        process result to tables
         """
         gss_str_Y, gss_str_N = "gssY_sl1N", "gssN_sl1N"
-
-        view_id_set = np.arange(0, 200, 10).tolist()
-
 
         fU_kU_dict, fU_kD_dict, fD_kU_dict, fD_kD_dict = {}, {}, {}, {}
         for view_id in view_id_set:
@@ -1054,32 +1065,82 @@ if __name__ == "__main__":
 
 
         fU_kU_sr, fU_kD_sr, fD_kU_sr, fD_kD_sr = [], [], [], []
+        fU_kU_it, fU_kD_it, fD_kU_it, fD_kD_it = [], [], [], []
         for dataset_name in dataset_selected:
             data = results_dict[dataset_name]
-            # succeed
-            sr_gssY, sr_gssN = 0, 0
-            for view_id, result in data[gss_str_Y]['fU_kU'].items():
-                sr_gssY += result["succeed"]
-                sr_gssN += result["succeed"]
-            fU_kU_sr.append( [ sr_gssY, sr_gssN ] )
 
+            calib_fk_str = 'fU_kU'
             sr_gssY, sr_gssN = 0, 0
-            for view_id, result in data[gss_str_Y]['fU_kD'].items():
-                sr_gssY += result["succeed"]
-                sr_gssN += result["succeed"]
-            fU_kD_sr.append( [ sr_gssY, sr_gssN ] )
+            it_gssY, it_gssN = 0, 0
+            for view_id in view_id_set:
+                # with GSS
+                result = data[gss_str_Y][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssY += 1               if success else 0
+                it_gssY += converge_iters  if success else 0
+                # with/o GSS
+                result = data[gss_str_N][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssN += 1               if success else 0
+                it_gssN += converge_iters  if success else 0
+            # it_gssY, it_gssN = it_gssY, it_gssN
+            fU_kU_it.append( [ it_gssY/sr_gssY, it_gssN/sr_gssN ] )
+            fU_kU_sr.append( [ sr_gssY/len(view_id_set), sr_gssN/len(view_id_set) ] )
 
-            sr_gssY, sr_gssN = 0, 0
-            for view_id, result in data[gss_str_Y]['fD_kU'].items():
-                sr_gssY += result["succeed"]
-                sr_gssN += result["succeed"]
-            fD_kU_sr.append( [ sr_gssY, sr_gssN ] )
 
+            calib_fk_str = 'fU_kD'
             sr_gssY, sr_gssN = 0, 0
-            for view_id, result in data[gss_str_Y]['fD_kD'].items():
-                sr_gssY += result["succeed"]
-                sr_gssN += result["succeed"]
-            fD_kD_sr.append( [ sr_gssY, sr_gssN ] )
+            it_gssY, it_gssN = 0, 0
+            for view_id in view_id_set:
+                # with GSS
+                result = data[gss_str_Y][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssY += 1               if success else 0
+                it_gssY += converge_iters  if success else 0
+                # with/o GSS
+                result = data[gss_str_N][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssN += 1               if success else 0
+                it_gssN += converge_iters  if success else 0
+            fU_kD_it.append( [ it_gssY/sr_gssY, it_gssN/sr_gssN ] )
+            fU_kD_sr.append( [ sr_gssY/len(view_id_set), sr_gssN/len(view_id_set) ] )
+
+
+            calib_fk_str = 'fD_kU'
+            sr_gssY, sr_gssN = 0, 0
+            it_gssY, it_gssN = 0, 0
+            for view_id in view_id_set:
+                # with GSS
+                result = data[gss_str_Y][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssY += 1               if success else 0
+                it_gssY += converge_iters  if success else 0
+                # with/o GSS
+                result = data[gss_str_N][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssN += 1               if success else 0
+                it_gssN += converge_iters  if success else 0
+            fD_kU_it.append( [ it_gssY/sr_gssY, it_gssN/sr_gssN ] )
+            fD_kU_sr.append( [ sr_gssY/len(view_id_set), sr_gssN/len(view_id_set) ] )
+
+
+            calib_fk_str = 'fD_kD'
+            sr_gssY, sr_gssN = 0, 0
+            it_gssY, it_gssN = 0, 0
+            for view_id in view_id_set:
+                # with GSS
+                result = data[gss_str_Y][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssY += 1               if success else 0
+                it_gssY += converge_iters  if success else 0
+                # with/o GSS
+                result = data[gss_str_N][calib_fk_str][view_id]
+                (success, converge_iters) = eval_iteration_convergence (focal_stack=result["focal_stack"], kappa_stack=result["kappa_stack"], gt_fx=result["gt_fx"], gt_kappa=result["gt_kappa"])
+                sr_gssN += 1               if success else 0
+                it_gssN += converge_iters  if success else 0
+            fD_kD_it.append( [ it_gssY/sr_gssY, it_gssN/sr_gssN ] )
+            fD_kD_sr.append( [ sr_gssY/len(view_id_set), sr_gssN/len(view_id_set) ] )
+
 
 
         fU_kU_str = "$f_x \\uparrow$ $\\kappa \\uparrow $"
@@ -1109,10 +1170,23 @@ if __name__ == "__main__":
         rich.print(f"\n{dataset_selected=}")
         rich.print(f"{gss_str_Y=} ([bold red]success-rate[/bold red])  [bold red]&[/bold red]  {gss_str_N=} ([bold red]success-rate[/bold red])")
 
-        for id, vals in enumerate([ fU_kU_sr,  fU_kD_sr,  fD_kU_sr,  fD_kD_sr ]):
-            pref = print_prefix_str[id]
+        for pref, vals, in zip(print_prefix_str, [ fU_kU_sr,  fU_kD_sr,  fD_kU_sr,  fD_kD_sr ]):
             vals_v = list( itertools.chain.from_iterable(vals) )
-            rich.print( pref, " & ", "  &  ".join( f"{(x/len(view_id_set)):.2f}" for x in vals_v  ),  " \\\\" )
+            rich.print( pref, " & ", "  &  ".join( f"{x:.3f}" for x in vals_v  ),  " \\\\" )
 
+
+        rich.print(f"\n{dataset_selected=}")
+        rich.print(f"{gss_str_Y=} ([bold red]iterations[/bold red])  [bold red]&[/bold red]  {gss_str_N=} ([bold red]iterations[/bold red])")
+        for pref, vals, in zip(print_prefix_str, [ fU_kU_it,  fU_kD_it,  fD_kU_it,  fD_kD_it ]):
+            vals_v = list( itertools.chain.from_iterable(vals) )
+            rich.print( pref, " & ", "  &  ".join( f"{x:.0f}" for x in vals_v  ),  " \\\\" )
+
+
+        rich.print(f"\n{dataset_selected=}")
+        rich.print(f"{gss_str_Y=} ([bold red]success-rate/iterations[/bold red])  [bold red]&[/bold red]  {gss_str_N=} ([bold red]success-rate/iterations[/bold red])")
+        for pref, vals_sr, vals_it in zip(print_prefix_str, [ fU_kU_sr,  fU_kD_sr,  fD_kU_sr,  fD_kD_sr ],  [ fU_kU_it,  fU_kD_it,  fD_kU_it,  fD_kD_it ]):
+            vals_v_sr = list( itertools.chain.from_iterable(vals_sr) )
+            vals_v_it = list( itertools.chain.from_iterable(vals_it) )
+            rich.print( pref, " & ", "  &  ".join( f"{sr*100:.1f}\% / {it:.0f}" for sr, it in zip(vals_v_sr, vals_v_it)  ),  " \\\\" )
 
 

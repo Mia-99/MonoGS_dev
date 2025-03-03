@@ -26,3 +26,4 @@ Herzjesu
 configs/mono/replica*
 .devcontainer
 *.pdf
+exp_*

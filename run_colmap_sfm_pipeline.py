@@ -32,6 +32,7 @@ from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras
 
 
 import pickle 
+import rich
 
 from sfm import SFM
 
@@ -65,7 +66,7 @@ import cv2
 
 from matplot_utils import annotate_image
 
-from gtsam_utils.bundle_adjustment import bundle_adjustment
+# from gtsam_utils.bundle_adjustment import bundle_adjustment
 
 
 
@@ -146,6 +147,7 @@ def read_groundtruth_camera(ground_truth_camera_file):
 
     K = np.array(lst[0:3])
     # print(f"K = \n{K}")
+    dist = np.array(lst[3])
 
     R = np.array(lst[4:7])
     T = lst[7]
@@ -159,60 +161,20 @@ def read_groundtruth_camera(ground_truth_camera_file):
     img_size = lst[8]
     width, height = int(img_size[0]), int(img_size[1])
 
-    return (K, W2C, width, height)
+    return (K, dist, W2C, width, height)
 
 
 
 
 
-def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, set_focal_error = None, save_to_dir = None):
-
-    # Set up command line argument parser
-    parser = ArgumentParser(description="Training script parameters")
-    lp = ModelParams(parser)
-    op = OptimizationParams(parser)
-    pp = PipelineParams(parser)
-    parser.add_argument('--ip', type=str, default="127.0.0.1")
-    parser.add_argument('--port', type=int, default=6009)
-    parser.add_argument('--debug_from', type=int, default=-1)
-    parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
-    parser.add_argument("--start_checkpoint", type=str, default = None)
-    args = parser.parse_args(sys.argv[1:])
-    args.save_iterations.append(args.iterations)
-    
-    print("Optimizing " + args.model_path)
-
-    # Initialize system state (RNG)
-    safe_state(args.quiet)
-
-
-    dataset = lp.extract(args)
-    opt = op.extract(args)
-    pipe = pp.extract(args)
-
-
-    opt.iterations = 100
-    opt.densification_interval = 30
-    opt.opacity_reset_interval = 200
-    opt.densify_from_iter = 49
-    opt.densify_until_iter = 2000
-    opt.densify_grad_threshold = 0.0002
-
+def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, set_focal_error = None, save_to_dir = None):
 
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
 
     if set_focal_error is not None:
         print(f"\nSet Focal Length Error:\n\tdelta_focal = {set_focal_error}. \n\tPerform BA to enforce this change.")
-        # print(f"self.reconstruction.images  = \n{reconstruction.reconstruction.images}")
-        # print(f"self.reconstruction.cameras = \n{reconstruction.reconstruction.cameras}")
         reconstruction.bundleAdjustmentByGivenCalibration(delta_focal=set_focal_error)
-        # print(f"self.reconstruction.images  = \n{reconstruction.reconstruction.images}")
-        # print(f"self.reconstruction.cameras = \n{reconstruction.reconstruction.cameras}")
 
 
     if False: # perform bundle adjustment using gtsam
@@ -238,17 +200,12 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
                         K=avg_K,
                         compute_marginals=False, plot_figure=True)
 
-        sys.exit()
-
-
-
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
-    
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale,  use_same_calib = True)
     
 
-    print(f"scale_info = {scale_info}")
+    rich.print(f"{scale_info=}")
     cameras_extent = scale_info["radius"]
 
     # initialize 3D Gaussians from sparse Colmap output
@@ -265,10 +222,9 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
     ## visualization
-    use_gui = True
     sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
-    sfm.require_calibration = True
-    sfm.allow_lens_distortion = True
+    # sfm.require_calibration = opt.require_calibration
+    # sfm.allow_lens_distortion = opt.allow_lens_distortion
 
     sfm.optimize(phase1_iter = phase1_iter,
                  phase3_iter = phase3_iter,
@@ -278,28 +234,61 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
 
     (W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images, error_images) = sfm.eval_data()
 
+    psnr_array, ssim_array, lpips_array = eval_rendering_metrics(rendered_images, captured_images)
+
+    if save_to_dir is not None:
+        pathlib.Path(save_to_dir).mkdir(parents=True, exist_ok=True)
+        for idx in range( len(rendered_images) ):
+            psnr = psnr_array[idx]
+
+            psnr_str = " {:.2f} ".format(psnr)
+            
+            rgb = sfm.tensor2rgb(rendered_images[idx])
+            fig, ax, _ = annotate_image(rgb, cmap=None, mytext = psnr_str)
+            plt.savefig(os.path.join(save_to_dir, str(idx)+'_rendering'+'.png'), bbox_inches='tight', pad_inches=0)
+            plt.close()
+            time.sleep(0.01)
+
+            rgb = sfm.tensor2rgb(captured_images[idx])
+            fig, ax, _ = annotate_image(rgb, cmap=None, mytext = psnr_str)
+            plt.savefig(os.path.join(save_to_dir, str(idx)+'_original'+'.png'), bbox_inches='tight', pad_inches=0)
+            plt.close()
+            time.sleep(0.01)
+
+            errormap = error_images[idx].permute(1, 2, 0).contiguous().cpu().numpy()
+            fig, ax, im = annotate_image(errormap, cmap='hot', mytext = psnr_str)
+            plt.colorbar(im)
+            plt.savefig(os.path.join(save_to_dir, str(idx)+'_errormap'+'.png'), bbox_inches='tight', pad_inches=0)            
+            plt.close()
+            time.sleep(0.01)
+
 
     # Fig = Viewer(viewpoint_stack=sfm.viewpoint_stack,  gaussians_gl= create_gaussians_gl(sfm.gaussians))
     uid_arr = []
     for viewpoint in viewpoint_stack:
         uid_arr.append(viewpoint.uid)
 
-
     posed_image_dict = reconstruction.getCamPosedImages()
     gt_W2C_dic = {}
+    gt_K_dic = {}
+    gt_dist_dic = {}
     for image_id, item in posed_image_dict.items():
         uid = image_id
         R, T, imgname, K, kappa = item
-        (K, pose, width, height) = read_groundtruth_camera(gt_dir + '/' + imgname + '.camera')
-        gt_W2C_dic[uid] = pose
+        (gt_K, gt_dist, gt_pose, width, height) = read_groundtruth_camera(gt_dir + '/' + imgname + '.camera')
+        gt_W2C_dic[uid] = gt_pose
         # print("uid ", uid)
+        gt_K_dic[uid] = gt_K
+        gt_dist_dic[uid] = gt_dist
     gt_W2C_arr = []
+    gt_K_arr = []
+    gt_dist_arr = []
     for uid in uid_arr:
         gt_W2C_arr.append ( gt_W2C_dic[uid] )
+        gt_K_arr.append( gt_K_dic[uid] )
+        gt_dist_arr.append( gt_dist_dic[uid] )
     # print(uid_arr)
     
-    psnr_array, ssim_array, lpips_array = eval_rendering_metrics(rendered_images, captured_images)
-
     gt_C2W_arr, C2W_arr = [], []
     gt_centers, centers = [], []
     for pose in gt_W2C_arr:
@@ -335,49 +324,76 @@ def main(image_dir, gt_dir, downsample_scale = 2**2, phase1_iter = 200, phase3_i
         plt.axis('equal')
         plt.show()
 
-    if save_to_dir is not None:
-        pathlib.Path(save_to_dir).mkdir(parents=True, exist_ok=True)
-        for idx in range( len(rendered_images) ):
-            psnr = psnr_array[idx]
 
-            psnr_str = " {:.2f} ".format(psnr)
-            
-            rgb = sfm.tensor2rgb(rendered_images[idx])
-            fig, ax, _ = annotate_image(rgb, cmap=None, mytext = psnr_str)
-            plt.savefig(os.path.join(save_to_dir, str(idx)+'_rendering'+'.png'), bbox_inches='tight', pad_inches=0)
-            plt.close()
-            time.sleep(0.01)
+    result ={
+        "psnr" : float(np.mean(psnr_array)),
+        "ssim" : float(np.mean(ssim_array)),
+        "lpips" : float(np.mean(lpips_array)),
+        "APE_trans" : ape_stat_trans,
+        "APE_rot"   : ape_stat_rot,
+        "W2C_arr"  : W2C_arr,
+        "gt_W2C_arr" : gt_W2C_arr,
+        "fx_arr" : fx_arr,
+        "fy_arr" : fy_arr,
+        "kappa_arr" : kappa_arr,
+        "gt_K_arr" : gt_K_arr,
+        "gt_dist_arr" : gt_dist_arr,
+    }
 
-            rgb = sfm.tensor2rgb(captured_images[idx])
-            fig, ax, _ = annotate_image(rgb, cmap=None, mytext = psnr_str)
-            plt.savefig(os.path.join(save_to_dir, str(idx)+'_original'+'.png'), bbox_inches='tight', pad_inches=0)
-            plt.close()
-            time.sleep(0.01)
-
-            errormap = error_images[idx].permute(1, 2, 0).contiguous().cpu().numpy()
-            fig, ax, im = annotate_image(errormap, cmap='hot', mytext = psnr_str)
-            plt.colorbar(im)
-            plt.savefig(os.path.join(save_to_dir, str(idx)+'_errormap'+'.png'), bbox_inches='tight', pad_inches=0)            
-            plt.close()
-            time.sleep(0.01)
+    return result
 
 
-
-    psnr_mean = float(np.mean(psnr_array))
-    ssim_mean = float(np.mean(ssim_array))
-    lpips_mean = float(np.mean(lpips_array))
-
-    fx = viewpoint_stack[-1].fx
-    fy = viewpoint_stack[-1].fy
-    kappa = viewpoint_stack[-1].kappa
-
-    return (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
 
 
 
 if __name__ == "__main__":
 
     mp.set_start_method('spawn')
+
+    # Set up command line argument parser
+    parser = ArgumentParser(description="Training script parameters")
+    lp = ModelParams(parser)
+    op = OptimizationParams(parser)
+    pp = PipelineParams(parser)
+    parser.add_argument('--ip', type=str, default="127.0.0.1")
+    parser.add_argument('--port', type=int, default=6009)
+    parser.add_argument('--debug_from', type=int, default=-1)
+    parser.add_argument('--detect_anomaly', action='store_true', default=False)
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
+    parser.add_argument("--start_checkpoint", type=str, default = None)
+    args = parser.parse_args(sys.argv[1:])
+    args.save_iterations.append(args.iterations)
+    
+    print("Optimizing " + args.model_path)
+
+    # Initialize system state (RNG)
+    safe_state(args.quiet)
+
+
+    dataset = lp.extract(args)
+    opt = op.extract(args)
+    pipe = pp.extract(args)
+
+
+    opt.require_calibration = True
+    opt.allow_lens_distortion = False
+
+
+    rich.print("dataset=", dataset.__dict__)
+    rich.print("pipe=", pipe.__dict__)
+    rich.print("opt=", opt.__dict__)
+
+
+    # opt.iterations = 1000
+    # opt.densification_interval = 30
+    # opt.opacity_reset_interval = 200
+    # opt.densify_from_iter = 49
+    # opt.densify_until_iter = 2000
+    # opt.densify_grad_threshold = 0.0002
+
 
     """ DATASET URL
     
@@ -411,271 +427,114 @@ if __name__ == "__main__":
         0 2764.16 1006.81
     '''
 
-    results = {}
-
-    runSfMDebug = 1
-    runBatchExp = 0
-    runSaveRendering = 0
-
-    GSS_iter = 0
-
-
-    if runSfMDebug:
-
-        image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
-        gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 100,
-                                                                                    phase3_iter = 5,
-                                                                                    phase2_DBA_iter = 20,
-                                                                                    phase2_CaliDBA_iter = 6, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=10,
-                                                                                    save_to_dir=os.path.join(os.getcwd(), "Debug/withCalib"))
-        print(f"\npsnr = {np.mean(psnr_mean)}\nssim_array = {np.mean(ssim_mean)}\nlpips_array={lpips_mean}\nape_trans={ape_stat_trans}\nape_rot={ape_stat_rot}")
-        print(f"fx = {fx}, fy = {fy}, kappa = {kappa}")
-
-
-
-
-
-    if runSaveRendering:
-        image_dir = "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images"
-        gt_dir =    "/hdd/sfm/Strecha-Herzjesu/Herzjesu/groundtruth"
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600+GSS_iter,
-                                                                                    phase2_CaliDBA_iter = 0,
-                                                                                    phase2_CaliDBA_GSS_iter = 0,
-                                                                                    save_to_dir=os.path.join(os.getcwd(), "Herzjesu/without"))
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500,
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    save_to_dir=os.path.join(os.getcwd(), "Herzjesu/withCalib"))
-        image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
-        gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600+GSS_iter,
-                                                                                    phase2_CaliDBA_iter = 0,
-                                                                                    phase2_CaliDBA_GSS_iter = 0,
-                                                                                    save_to_dir=os.path.join(os.getcwd(), "Fountain/without"))
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500,
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    save_to_dir=os.path.join(os.getcwd(), "Fountain/withCalib"))
-
-
-
-    if runBatchExp:
-        image_dir = "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images"
-        gt_dir =    "/hdd/sfm/Strecha-Herzjesu/Herzjesu/groundtruth"
-
-        # w/o clibration
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600+GSS_iter,
-                                                                                    phase2_CaliDBA_iter = 0,
-                                                                                    phase2_CaliDBA_GSS_iter = 0)
-        print(f"Herzjesu[w/o]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
-        results["Herzjesu[w/o]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
     
-        # w/ calibration
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500,
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter)
-        print(f"Herzjesu[w/.]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
-        results["Herzjesu[w/.]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+
+    datasets_dict = {
+        "Herzjesu" : {
+            "name" :      "Herzjesu",
+            "image_dir":  "/hdd/sfm/Strecha-Herzjesu/Herzjesu/images",
+            "gt_dir":     "/hdd/sfm/Strecha-Herzjesu/Herzjesu/groundtruth"
+        },
+        "Fountain" : {
+            "name" :      "Fountain",
+            "image_dir":  "/hdd/sfm/Strecha-Fountain/Fountain/images",
+            "gt_dir":     "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
+        }
+    }
+
+    
+    result_root_dir = os.path.join(os.getcwd(), "result_sfm")
 
 
-        # w/ calibration. 50
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=50)
-        results["Herzjesu[w/50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+    if False:
 
-
-        # w/ calibration. 100
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=100)
-        results["Herzjesu[w/100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-        # w/ calibration. 150
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=150)
-        results["Herzjesu[w/150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-        # w/ calibration. -50
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=-50)
-        results["Herzjesu[w/-50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-        # w/ calibration. -100
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=-100)
-        results["Herzjesu[w/-100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-
-        # w/ calibration. -150
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=-150)
-        results["Herzjesu[w/-150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-
-    if runBatchExp:
         image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
         gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
 
-        # w/o clibration
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 600+GSS_iter,
-                                                                                    phase2_CaliDBA_iter = 0,
-                                                                                    phase2_CaliDBA_GSS_iter = 0)
-        print(f"Fountain[w/o]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
-        results["Fountain[w/o]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+        GSS_iter = 0
+        
+        result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = True, downsample_scale = 2**2,
+                    phase1_iter = 100,
+                    phase3_iter = 5,
+                    phase2_DBA_iter = 20,
+                    phase2_CaliDBA_iter = 6, 
+                    phase2_CaliDBA_GSS_iter = GSS_iter,
+                    set_focal_error=10,
+                    save_to_dir=os.path.join(result_root_dir, "Debug", "withCalib"))
+        rich.print(result)
+
+
+    if True:
+
+        for datasetname, dataset in datasets_dict.items():
+
+            image_dir, gt_dir = dataset["image_dir"], dataset["gt_dir"]
+
+            result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
+                        phase1_iter = 200,
+                        phase3_iter = 500,
+                        phase2_DBA_iter = 600,
+                        phase2_CaliDBA_iter = 0,
+                        phase2_CaliDBA_GSS_iter = 0,
+                        save_to_dir=os.path.join(result_root_dir, datasetname, "without"))
+            rich.print(result)
+            
+            result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
+                        phase1_iter = 200,
+                        phase3_iter = 500,
+                        phase2_DBA_iter = 100,
+                        phase2_CaliDBA_iter = 500,
+                        phase2_CaliDBA_GSS_iter = 0,
+                        save_to_dir=os.path.join(result_root_dir, datasetname, "withCalib"))
+            rich.print(result)
+
+
+
+    if True:
+
+        results = {}
+
+        for datasetname, dataset in datasets_dict.items():
+
+            image_dir, gt_dir = dataset["image_dir"], dataset["gt_dir"]
+
+
+            # w/o clibration
+            result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
+                        phase1_iter = 200,
+                        phase3_iter = 500,
+                        phase2_DBA_iter = 600,
+                        phase2_CaliDBA_iter = 0,
+                        phase2_CaliDBA_GSS_iter = 0)
+            results[datasetname]['w/o'] = result
     
-        # w/ calibration
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500,
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter)
-        print(f"Fountain[w/.]: {(psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)}")
-        results["Fountain[w/.]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+            # w/. calibration
+            for focal_error in [None, 50, 100, 150, -50, -100, -150]:
+
+                result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
+                        phase1_iter = 200,
+                        phase3_iter = 500,
+                        phase2_DBA_iter = 100,
+                        phase2_CaliDBA_iter = 500, 
+                        phase2_CaliDBA_GSS_iter = 0,
+                        set_focal_error=focal_error)
+                results[datasetname]['w/.'+str(focal_error)] = result
 
 
-        # w/ calibration. 50
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=50)
-        results["Fountain[w/50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+            with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'wb') as f:
+                pickle.dump(results, f)
 
+        rich.print("results=", results)
 
-        # w/ calibration. 100
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=100)
-        results["Fountain[w/100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+    else:
 
-
-        # w/ calibration. 150
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=150)
-        results["Fountain[w/150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-        # w/ calibration. -50
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=-50)
-        results["Fountain[w/-50]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-        # w/ calibration. -100
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=-100)
-        results["Fountain[w/-100]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
-
-
-        # w/ calibration. -150
-        (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa) = main(image_dir, gt_dir, downsample_scale = 2**2,
-                                                                                    phase1_iter = 200,
-                                                                                    phase3_iter = 500,
-                                                                                    phase2_DBA_iter = 100,
-                                                                                    phase2_CaliDBA_iter = 500, 
-                                                                                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                                                                                    set_focal_error=-150)
-        results["Fountain[w/-150]"] = (psnr_mean, ssim_mean, lpips_mean, ape_stat_trans, ape_stat_rot, fx, fy, kappa)
+        with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'rb') as f:
+            results = pickle.load(f)
+        rich.print("results=", results)
 
 
 
-
-    if runBatchExp:
-
-        print("results")
-        print(results)
-
-
-        with open('saved_results.pkl', 'wb') as f:
-            pickle.dump(results, f)
-
-
-        with open('saved_results.pkl', 'rb') as f:
-            loaded_dict = pickle.load(f)
-
-        print("loaded dict")
-        print(loaded_dict)
+        
 
 
 

@@ -96,8 +96,8 @@ class SFM(mp.Process):
         self.pause = False
         
 
-        self.require_calibration = True
-        self.allow_lens_distortion = True
+        self.require_calibration = self.opt.require_calibration
+        self.allow_lens_distortion = self.opt.allow_lens_distortion
 
         self.focal_reference = None
 
