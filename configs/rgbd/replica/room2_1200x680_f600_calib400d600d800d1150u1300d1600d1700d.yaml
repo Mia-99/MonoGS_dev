@@ -1,0 +1,29 @@
+inherit_from: configs/rgbd/replica/base_config.yaml
+Dataset:
+  dataset_path: /hdd/replica_rendering/room2_1200x680_f600_calib400d600d800d1150u1300d1600d1700d
+  type: replica
+  single_thread: false
+  Calibration:
+    fx: 600.0
+    fy: 600.0
+    cx: 599.5
+    cy: 339.5
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0
+    width: 1200
+    height: 680
+    depth_scale: 6553.5
+    distorted: false
+  SelfCalibration:
+    enabled: true
+    radial_distortion: 0
+    frame_id: 400, 600, 800, 1150, 1300, 1600, 1700
+    gt_fx: 550, 450, 400, 500, 450, 400, 350
+    backend_params:
+      lr_cnt1: 0.002
+      lr_cnt2: 0.0002
+  grad_mask_row: 32
+  grad_mask_col: 32

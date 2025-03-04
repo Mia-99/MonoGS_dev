@@ -27,6 +27,9 @@ class ColMap:
             self.run(image_dir)
 
 
+        self.avg_K = None
+        self.avg_distort = None
+
     def run(self, image_dir=None):
 
         self.image_dir = image_dir
@@ -66,7 +69,8 @@ class ColMap:
         pycolmap.extract_features(database_path, image_dir,
                                   camera_mode = pycolmap.CameraMode.SINGLE,
                                   camera_model = 'SIMPLE_RADIAL',
-                                  reader_options = pycolmap.ImageReaderOptions(existing_camera_id = 1))
+                                #   reader_options = pycolmap.ImageReaderOptions(existing_camera_id = 1)
+                                  )
         
 
         pycolmap.match_exhaustive(database_path)
@@ -76,7 +80,7 @@ class ColMap:
         self.reconstruction = maps[0]
         # print(self.reconstruction.summary())
 
-        if False:
+        if True:
             # use single camera intrinsic calibration for all images
             self.__set_to_single_camera()
             '''
@@ -145,6 +149,8 @@ class ColMap:
     # X_cam = R * X_world  +  t
     def getCamPosedImages(self):
         calib_dict, avg_K, avg_kappa = self.__get_calibration()
+        self.avg_K = avg_K
+        self.avg_distort = np.array( [ avg_kappa ] )
         posed_image_dict = {}
         for image_id, image in self.reconstruction.images.items():
             pose = image.cam_from_world
@@ -218,29 +224,24 @@ class ColMap:
 
 
     def __set_to_single_camera(self, focal = None, kappa = None, delta_focal = None):        
-        # set all cameras to the same camera
-        for image_id, image in self.reconstruction.images.items():
-            print(f"{image.camera_id=}, {type(image.camera_id)=}")
-
-            print(image.has_camera_id())
-            print(image.has_camera_ptr())
-
-            print(image.reset_camera_ptr())
-
-            print(image.has_camera_id())
-            print(image.has_camera_ptr())
-
-            image.camera_id = int(self.single_cam_id)
-        
+        # pick a camera
+        for id in self.reconstruction.cameras:
+            self.single_cam_id = id
+            break
+        cam = self.reconstruction.cameras[ self.single_cam_id ]
+        # set errors
         if focal is not None:
-            self.reconstruction.cameras[ self.single_cam_id ].params[0] = focal
-
+            cam.params[0] = focal
         if kappa is not None:
-            self.reconstruction.cameras[ self.single_cam_id ].params[3] = kappa
-
+            cam.params[3] = kappa
         if delta_focal is not None:
-            self.reconstruction.cameras[ self.single_cam_id ].params[0] += delta_focal
-
+            cam.params[0] += delta_focal
+        # set all cameras to the same camera
+        for image_id in self.reconstruction.images:
+            image = self.reconstruction.images[image_id]
+            image.camera = cam
+            assert image.camera_id==self.single_cam_id, "image.camera_id != self.single_cam_id"
+            
         return self.single_cam_id
 
 
@@ -254,7 +255,15 @@ if __name__ == "__main__":
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
 
+    for image_id, item in reconstruction.getCamPosedImages().items():
+        R, T, imgname, K, kappa = item
+        print(f"fx = {K[0, 0]:.5f},  fy = {K[1, 1]:.5f},  cx = {K[0, 2]:.5f},  cy = {K[1, 2]:.5f}")
 
+    if False:
+        reconstruction.bundleAdjustmentByGivenCalibration (focal = None, kappa = None, delta_focal = -1000)
+        for image_id, item in reconstruction.getCamPosedImages().items():
+            R, T, imgname, K, kappa = item
+            print(f"fx = {K[0, 0]:.5f},  fy = {K[1, 1]:.5f},  cx = {K[0, 2]:.5f},  cy = {K[1, 2]:.5f}")
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud.  3. Calibrations
     positions, colors = reconstruction.getPointCloud()
@@ -291,7 +300,6 @@ if __name__ == "__main__":
             extrinsic[:3, 3] = T
             cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=WIDTH, view_height_px=HEIGHT, intrinsic=intrinsic, extrinsic=extrinsic)
             vis.add_geometry(cameraLines)
-
 
         # visualize and block
         vis.run()

@@ -338,11 +338,51 @@ def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_sc
         "kappa_arr" : kappa_arr,
         "gt_K_arr" : gt_K_arr,
         "gt_dist_arr" : gt_dist_arr,
+        "downsample_scale" : downsample_scale
     }
 
     return result
 
 
+
+
+def format_results_to_latex_str (results):
+
+    latex_str = []
+
+    latex_str.append(f"\\begin{{tabular}}{{ l | c | c | ccc }}")
+    latex_str.append(" *  & RFE & ATE & PSNR & SSIM & LPIPS \\\\")
+    latex_str.append("\\midrule")
+    for datasetname in results:
+
+        latex_str.append(f"\\multicolumn{{6}}{{c}}{{ {datasetname} }}   \\\\")
+        latex_str.append("\\midrule")
+
+        for calib_flag in results[datasetname]:
+            result = results[datasetname][calib_flag]
+
+            downsample_scale = 4 #result["downsample_scale"]
+
+            gt_fx     = result["gt_K_arr"][-1][0, 0]
+            gt_kappa  = result["gt_dist_arr"][-1][0]
+            fx        = result["fx_arr"][-1] * downsample_scale
+            kappa     = result["kappa_arr"][-1]
+
+            RCE_focal = abs( (fx - gt_fx) / gt_fx )
+            # RCE_kappa = abs( (kappa - gt_kappa) / gt_kappa ) # gt_kappa = 0
+
+            APE_t     = result["APE_trans"]
+            APE_r     = result["APE_rot"]
+
+            gs_psnr   = result["psnr"]
+            gs_ssim   = result["ssim"]
+            gs_lpips  = result["lpips"]
+
+            latex_str.append( f"{calib_flag} & {100*RCE_focal:.3f}\\%  &  {APE_t:.5f} & {gs_psnr:.2f} & {gs_ssim:.3f} & {gs_lpips:.4f}  \\\\" )
+
+    latex_str.append(f"\\end{{tabular}}")
+
+    return latex_str
 
 
 
@@ -464,7 +504,7 @@ if __name__ == "__main__":
         rich.print(result)
 
 
-    if True:
+    if False:
 
         for datasetname, dataset in datasets_dict.items():
 
@@ -490,11 +530,13 @@ if __name__ == "__main__":
 
 
 
-    if True:
+    if False:
 
         results = {}
 
         for datasetname, dataset in datasets_dict.items():
+
+            results[datasetname] = {}
 
             image_dir, gt_dir = dataset["image_dir"], dataset["gt_dir"]
 
@@ -520,9 +562,8 @@ if __name__ == "__main__":
                         set_focal_error=focal_error)
                 results[datasetname]['w/.'+str(focal_error)] = result
 
-
-            with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'wb') as f:
-                pickle.dump(results, f)
+                with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'wb') as f:
+                    pickle.dump(results, f)
 
         rich.print("results=", results)
 
@@ -533,8 +574,13 @@ if __name__ == "__main__":
         rich.print("results=", results)
 
 
+    latex_str = format_results_to_latex_str (results)
+    with open( os.path.join(result_root_dir, 'sfm_latex_table.txt'), 'w') as f:
+        for s in latex_str:
+            f.write(s)
+            f.write("\n")
 
-        
-
+    for s in latex_str:
+        print(s)
 
 

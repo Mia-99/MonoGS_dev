@@ -900,7 +900,7 @@ if __name__ == "__main__":
         return success, len(rle_focal)
 
 
-    if True:
+    if False:
 
         max_iters = 300
         dataset_root_dir = "/hdd/3DGS"
@@ -1187,6 +1187,6 @@ if __name__ == "__main__":
         for pref, vals_sr, vals_it in zip(print_prefix_str, [ fU_kU_sr,  fU_kD_sr,  fD_kU_sr,  fD_kD_sr ],  [ fU_kU_it,  fU_kD_it,  fD_kU_it,  fD_kD_it ]):
             vals_v_sr = list( itertools.chain.from_iterable(vals_sr) )
             vals_v_it = list( itertools.chain.from_iterable(vals_it) )
-            rich.print( pref, " & ", "  &  ".join( f"{sr*100:.1f}\% / {it:.0f}" for sr, it in zip(vals_v_sr, vals_v_it)  ),  " \\\\" )
+            rich.print( pref, " & ", "  &  ".join( f"{sr*100:.1f}\\% / {it:.0f}" for sr, it in zip(vals_v_sr, vals_v_it)  ),  " \\\\" )
 
 

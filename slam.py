@@ -271,6 +271,7 @@ if __name__ == "__main__":
     parser.add_argument("--disable_selfcalibration", action="store_true", default=False, help='default=False. force to disable selfcalibration and overwrite config file') # overwrite config
     parser.add_argument("--disable_gui", action="store_true", default=False, help='default=False. force to disable gui') # overwrite config
     parser.add_argument("--use_gt_pose", action="store_true", default=False, help='default=False. use provided ground-truth poses') # use ground-truth poses
+    parser.add_argument("--save_dir", type=str, default=None, help='path to save slam results, default=results')
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -303,6 +304,9 @@ if __name__ == "__main__":
     # disable gui
     if args.disable_gui:
         config["Results"]["use_gui"] = False
+
+    if args.save_dir is not None:
+        config["Results"]["save_dir"] = args.save_dir
 
     # use ground-truth poses
     if args.use_gt_pose:
