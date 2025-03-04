@@ -406,19 +406,26 @@ class SFM(mp.Process):
         progress_bar.close()
 
 
-    def run_phase2 (self, max_iters = 500, update_Gaussian = False, update_pose = False, update_calibration = False, use_scale_space = False):
+    def run_phase2 (self, max_iters = 1000, update_Gaussian = False, update_pose = False, update_calibration = False, use_scale_space = False):
         '''
         BA (Gaussian, pose, calibration)
         '''
         self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
         self.pose_optimizer.zero_grad()
         self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-        self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
+        self.calibration_optimizer.update_focal_learning_rate (lr = 0.01)
         self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
         self.calibration_optimizer.zero_grad()
         progress_bar = tqdm(range(1, max_iters+1), desc="Phase2: Training progress")
         cam_cnt = 0
         for iteration in range(0, max_iters):
+
+            if iteration == 300:
+                self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+                self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
+                self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
+                self.calibration_optimizer.zero_grad()
+
             self.read_gui_ctrl()
             densify_prune = iteration and (iteration % 50 ==0)
             reset_opacity = iteration and (iteration % 300 ==0)

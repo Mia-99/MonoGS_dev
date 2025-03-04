@@ -21,7 +21,7 @@ from gaussian_splatting.scene.colmap_loader import read_extrinsics_text, read_in
 
 
 # a function to create a list of Camera classes in 3DGS/MonoGS
-def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_calib = True):
+def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0):
     camera_stack = []
     camera_centers = []
     posed_image_stack = colmap.getCamPosedImages()
@@ -64,6 +64,7 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0,  use_same_cal
                     trans=np.array([0.0, 0.0, 0.0]),
                     scale=1.0,
                     gt_alpha_mask = None,
+                    calib_id=1,
                     device="cuda:0",
         )
         camera_stack.append(cam)
@@ -151,9 +152,6 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 
 
 
-def assemble_3DGS_cameras_from_binary_file (camera_bin_file):
-    pass
-
 
 
 
@@ -223,6 +221,7 @@ def assemble_3DGS_cameras_from_3DGS_JSON_file (camera_json_file):
                     trans=np.array([0.0, 0.0, 0.0]),
                     scale=1.0,
                     gt_alpha_mask = None,
+                    calib_id=1,
                     device="cuda:0",
         )
         camera_stack.append(cam)

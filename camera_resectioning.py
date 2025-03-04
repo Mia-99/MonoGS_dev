@@ -235,7 +235,7 @@ class CameraResectioning(mp.Process):
         At initialization, if both kappa and focal are optimzied at the same time, the value of kappa fluctuates.
         THUS, it is better to optimize focal ONLY for some iterations, before JOINTLY optimizing focal and kappa 
         '''
-        self.start_kappa_optimization_at_iter = 20  # optimize focal ONLY before this iteration
+        self.start_kappa_optimization_at_iter = 30  # optimize focal ONLY before this iteration
 
         self.gaussians.optimizer = None # Do NOT optimize Gaussian
 
@@ -459,13 +459,13 @@ class CameraResectioning(mp.Process):
             if (iteration == scale_space_iters):
                 use_scale_space = False
 
-            if (iteration == 50):
-                lr = self.calibration_optimizer.estimate_step_size()
-                self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-                self.calibration_optimizer.update_focal_learning_rate (lr = 0.02)
-                self.calibration_optimizer.update_kappa_learning_rate (lr = 0.01)
+            # if (iteration == 100):
+            #     lr = self.calibration_optimizer.estimate_step_size()
+            #     self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
+            #     self.calibration_optimizer.update_focal_learning_rate (lr = 0.02)
+            #     self.calibration_optimizer.update_kappa_learning_rate (lr = 0.01)
 
-            if (iteration == 150):
+            if (iteration == 100):
                 lr = self.calibration_optimizer.estimate_step_size()
                 self.calibration_optimizer = CalibrationOptimizer([ viewpoint ], focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
                 self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
@@ -900,9 +900,9 @@ if __name__ == "__main__":
         return success, len(rle_focal)
 
 
-    if False:
+    if True:
 
-        max_iters = 300
+        max_iters = 500
         dataset_root_dir = "/hdd/3DGS"
 
         if False:

@@ -36,6 +36,7 @@ class Camera(nn.Module):
         trans=np.array([0.0, 0.0, 0.0]),
         scale=1.0,
         gt_alpha_mask = None,
+        calib_id=None,
         device="cuda:0",
     ):
         super(Camera, self).__init__()
@@ -109,7 +110,7 @@ class Camera(nn.Module):
             self.data_device = torch.device("cuda")
 
 
-        self.calib_id = 0
+        self.calib_id = calib_id if calib_id is not None else 0
 
 
         # backup

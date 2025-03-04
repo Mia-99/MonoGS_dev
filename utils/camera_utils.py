@@ -79,11 +79,9 @@ class Camera(nn.Module):
         self.cam_kappa_delta = nn.Parameter(
             torch.tensor([0.0], requires_grad=True, device=device)
         )
-        # add calibration identifier for calibration groups
-        if calib_id is not None:
-            self.calib_id = calib_id
-        else:
-            self.calib_id = 0
+
+        self.calib_id = calib_id if calib_id is not None else 0
+        
         # self.projection_matrix = self.projection_matrix.to(device=device)
 
     @staticmethod
