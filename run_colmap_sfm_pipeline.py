@@ -34,7 +34,7 @@ from colmap_utils.gaussian_splatting_utils import assemble_3DGS_cameras
 import pickle 
 import rich
 
-from sfm import SFM
+from sfm import SFM, print_viewpoint_stack
 
 
 
@@ -178,7 +178,8 @@ def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_sc
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale)
-    
+    print_viewpoint_stack(viewpoint_stack)
+
 
     rich.print(f"{scale_info=}")
     cameras_extent = scale_info["radius"]
@@ -461,22 +462,29 @@ if __name__ == "__main__":
     result_root_dir = os.path.join(os.getcwd(), "result_sfm")
 
 
-    if False:
+    if True:
 
         image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
         gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
 
+
+        phase1_iter, phase3_iter = 200, 500
+        phase2_DBA_iter, phase2_CaliDBA_iter = 100, 500
         GSS_iter = 0
         
         result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = True, downsample_scale = 2**2,
-                    phase1_iter = 100,
-                    phase3_iter = 5,
-                    phase2_DBA_iter = 20,
-                    phase2_CaliDBA_iter = 6, 
+                    phase1_iter = phase1_iter,
+                    phase3_iter = phase3_iter,
+                    phase2_DBA_iter = phase2_DBA_iter,
+                    phase2_CaliDBA_iter = phase2_CaliDBA_iter,
                     phase2_CaliDBA_GSS_iter = GSS_iter,
                     set_focal_error=10,
                     save_to_dir=os.path.join(result_root_dir, "Debug", "withCalib"))
-        rich.print(result)
+        # rich.print(result)
+        results = {"Foundtain" : {"w/" : result}}
+        latex_str = format_results_to_latex_str (results)
+        for s in latex_str:
+            print(s)
 
 
 

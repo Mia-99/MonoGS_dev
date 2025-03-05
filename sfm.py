@@ -136,7 +136,7 @@ class SFM(mp.Process):
             params_gui = gui_utils.ParamsGUI(
                 pipe=pipe,
                 background=torch.tensor(bg_color, dtype=torch.float32, device="cuda"),
-                gaussians=self.gaussians if self.gaussians is not None else GaussianModel(0),
+                gaussians=self.gaussians,
                 q_main2vis=self.q_main2vis,
                 q_vis2main=self.q_vis2main,
             )
@@ -500,6 +500,7 @@ class SFM(mp.Process):
         self.gaussians.training_setup(self.opt)
 
         sfm_gui.Log("start SfM optimization")
+        print_viewpoint_stack(self.viewpoint_stack)
 
         # Gaussian initialization
         self.run_phase1(max_iters = phase1_iter)

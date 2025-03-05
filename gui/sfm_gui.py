@@ -62,7 +62,7 @@ class SFM_GUI:
         if params_gui is not None:
             self.background = params_gui.background
             self.gaussian_cur = params_gui.gaussians
-            self.init = True
+            self.init = False
             self.q_main2vis = params_gui.q_main2vis
             self.q_vis2main = params_gui.q_vis2main
             self.pipe = params_gui.pipe
@@ -548,8 +548,7 @@ class SFM_GUI:
 
     def get_current_cam(self):
         w2c = cv_gl @ self.widget3d.scene.camera.get_view_matrix()
-        # Log(f"cv_gl @ self.widget3d.scene.camera.get_view_matrix() = {w2c}")
-
+        # Log(f"self.widget3d.scene.camera.get_view_matrix() = {self.widget3d.scene.camera.get_view_matrix()}")
         image_gui = torch.zeros(
             (1, int(self.window.size.height), int(self.widget3d_width))
         )
@@ -624,7 +623,7 @@ class SFM_GUI:
                 self.scaling_slider.double_value,
             )
             self.gaussian_cur.get_features = features
-        else:            
+        else:
             rendering_data = render(
                 current_cam,
                 self.gaussian_cur,
