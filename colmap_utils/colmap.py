@@ -225,9 +225,7 @@ class ColMap:
 
     def __set_to_single_camera(self, focal = None, kappa = None, delta_focal = None):        
         # pick a camera
-        for id in self.reconstruction.cameras:
-            self.single_cam_id = id
-            break
+        self.single_cam_id = list( self.reconstruction.cameras.keys() ).pop()
         cam = self.reconstruction.cameras[ self.single_cam_id ]
         # set errors
         if focal is not None:
