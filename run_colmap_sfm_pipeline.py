@@ -172,16 +172,8 @@ def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_sc
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
 
-    if set_focal_error is not None:
-        print(f"\nSet Focal Length Error:\n\tdelta_focal = {set_focal_error}. \n\tPerform BA to enforce this change.")
-        reconstruction.bundleAdjustmentByGivenCalibration(delta_focal=set_focal_error)
-
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale)
-    print_viewpoint_stack(viewpoint_stack)
-
-
-    rich.print(f"{scale_info=}")
     cameras_extent = scale_info["radius"]
 
     # initialize 3D Gaussians from sparse Colmap output
@@ -193,20 +185,36 @@ def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_sc
     gaussians.create_from_pcd(pcd, cameras_extent)
     gaussians.training_setup(opt)
 
+    """
+    SFM
+    """
+    sfm = SFM(pipe, use_gui, copy.deepcopy( viewpoint_stack ), gaussians, opt, cameras_extent)
     print(f"Run with image W: { viewpoint_stack[0].image_width },  H: { viewpoint_stack[0].image_height }")
-
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
-    ## visualization
-    sfm = SFM(pipe, use_gui, viewpoint_stack, gaussians, opt, cameras_extent)
-    # sfm.require_calibration = opt.require_calibration
-    # sfm.allow_lens_distortion = opt.allow_lens_distortion
+    rich.print("\nPHASE 1")
+    print_viewpoint_stack(viewpoint_stack)
+
+    """
+    Create noisy intial value for DBA-Calib
+    """
+    viewpoint_stack_reset = None
+    if set_focal_error is not None:
+        print(f"\nSet Focal Length Error:\n\tdelta_focal = {set_focal_error}. \n\tPerform BA to enforce this change.")
+        reconstruction.bundleAdjustmentByGivenCalibration(delta_focal=set_focal_error)
+        viewpoint_stack_reset, _ = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale)        
+        rich.print("\nPHASE 2")
+        print_viewpoint_stack(viewpoint_stack_reset)
+
 
     sfm.optimize(phase1_iter = phase1_iter,
                  phase3_iter = phase3_iter,
                  phase2_DBA_iter = phase2_DBA_iter,
                  phase2_CaliDBA_iter = phase2_CaliDBA_iter,
-                 phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter)
+                 phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
+                #  set_focal_error = set_focal_error/downsample_scale,
+                 viewpoint_stack_reset = copy.deepcopy(viewpoint_stack_reset) if set_focal_error is not None else None
+                 )
 
     (W2C_arr, fx_arr, fy_arr, kappa_arr, rendered_images, captured_images, error_images) = sfm.eval_data()
 
@@ -461,40 +469,42 @@ if __name__ == "__main__":
     
     result_root_dir = os.path.join(os.getcwd(), "result_sfm")
 
-
-    if True:
-
-        image_dir = "/hdd/sfm/Strecha-Fountain/Fountain/images"
-        gt_dir =    "/hdd/sfm/Strecha-Fountain/Fountain/groundtruth"
+    phase1_iter, phase3_iter = 200, 500 # standard 3DGS rountine, camera not optimized
+    phase2_DBA_iter, phase2_CaliDBA_iter = 100, 1000 # Gaussian is free to optimize
+    phase2_CaliDBA_GSS_iter = 100 # Gaussian is fixed when performing scale space optimization
 
 
-        phase1_iter, phase3_iter = 200, 500
-        phase2_DBA_iter, phase2_CaliDBA_iter = 100, 500
-        GSS_iter = 0
-        
+    if False:
+
+        datasetname = "Fountain"
+        image_dir, gt_dir,  = datasets_dict[datasetname]["image_dir"], datasets_dict[datasetname]["gt_dir"], 
+
+        """
+        GT: 690
+        """
+        use_GSS = True
+        focal_error=-300
         result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = True, downsample_scale = 2**2,
                     phase1_iter = phase1_iter,
                     phase3_iter = phase3_iter,
                     phase2_DBA_iter = phase2_DBA_iter,
                     phase2_CaliDBA_iter = phase2_CaliDBA_iter,
-                    phase2_CaliDBA_GSS_iter = GSS_iter,
-                    set_focal_error=10,
+                    phase2_CaliDBA_GSS_iter = (phase2_CaliDBA_GSS_iter if use_GSS else 0),
+                    set_focal_error=focal_error*(2**2),
                     save_to_dir=os.path.join(result_root_dir, "Debug", "withCalib"))
-        # rich.print(result)
-        results = {"Foundtain" : {"w/" : result}}
+        results = {datasetname : {"w/" : result}}
         latex_str = format_results_to_latex_str (results)
         for s in latex_str:
             print(s)
 
+        sys.exit()
 
 
 
     if False:
-
-        phase1_iter, phase3_iter = 200, 500
-        phase2_DBA_iter, phase2_CaliDBA_iter = 100, 500
-        
-
+        """
+        save rendered images
+        """
         for datasetname, dataset in datasets_dict.items():
 
             image_dir, gt_dir = dataset["image_dir"], dataset["gt_dir"]
@@ -502,22 +512,24 @@ if __name__ == "__main__":
             result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
                         phase1_iter = phase1_iter,
                         phase3_iter = phase3_iter,
-                        phase2_DBA_iter = phase2_DBA_iter+phase2_CaliDBA_iter,
+                        phase2_DBA_iter = phase2_DBA_iter+phase2_CaliDBA_iter+phase2_CaliDBA_GSS_iter,
                         phase2_CaliDBA_iter = 0,
                         phase2_CaliDBA_GSS_iter = 0,
                         save_to_dir=os.path.join(result_root_dir, datasetname, "without"))
-            rich.print(result)
+            # rich.print(result)
             
             result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
                         phase1_iter = phase1_iter,
                         phase3_iter = phase3_iter,
                         phase2_DBA_iter = phase2_DBA_iter,
                         phase2_CaliDBA_iter = phase2_CaliDBA_iter,
-                        phase2_CaliDBA_GSS_iter = 0,
+                        phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
                         save_to_dir=os.path.join(result_root_dir, datasetname, "withCalib"))
-            rich.print(result)
+            # rich.print(result)
 
 
+    if True:
+    
         results = {}
 
         for datasetname, dataset in datasets_dict.items():
@@ -531,43 +543,45 @@ if __name__ == "__main__":
             result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
                         phase1_iter = phase1_iter,
                         phase3_iter = phase3_iter,
-                        phase2_DBA_iter = phase2_DBA_iter+phase2_CaliDBA_iter,
+                        phase2_DBA_iter = phase2_DBA_iter+phase2_CaliDBA_iter+phase2_CaliDBA_GSS_iter,
                         phase2_CaliDBA_iter = 0,
                         phase2_CaliDBA_GSS_iter = 0)
             results[datasetname]['w/o'] = result
     
             # w/. calibration
-            for focal_error in [None, 50, 100, 150, -50, -100, -150]:
-
-                result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
-                        phase1_iter = phase1_iter,
-                        phase3_iter = phase3_iter,
-                        phase2_DBA_iter = phase2_DBA_iter,
-                        phase2_CaliDBA_iter = phase2_CaliDBA_iter,
-                        phase2_CaliDBA_GSS_iter = 0,
-                        set_focal_error=focal_error)
-                calib_str = 'w/'+str(focal_error) if focal_error is not None else 'w/.'
-                results[datasetname][calib_str] = result
-
-                with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'wb') as f:
-                    pickle.dump(results, f)
-
-        rich.print("results=", results)
+            for focal_error in [0, -50, -100, -200, -300, 50, 100, 200, 300, 400, 500]:
+                calib_str = 'w/'+str(focal_error) if focal_error !=0 else 'w/'
+                results[datasetname][calib_str] = {}
+                """
+                with and without Gaussian scale space
+                """
+                for use_GSS in [True, False]: 
+                    result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
+                            phase1_iter = phase1_iter,
+                            phase3_iter = phase3_iter,
+                            phase2_DBA_iter = phase2_DBA_iter,
+                            phase2_CaliDBA_iter = phase2_CaliDBA_iter,
+                            phase2_CaliDBA_GSS_iter = (phase2_CaliDBA_GSS_iter if use_GSS else 0),
+                            set_focal_error= (focal_error*(2**2) if focal_error is not None else None)
+                        )
+                    results[datasetname][calib_str][use_GSS] = result
+                    with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'wb') as f:
+                        pickle.dump(results, f)
 
     else:
 
         with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'rb') as f:
             results = pickle.load(f)
-        rich.print("results=", results)
+        # rich.print("results=", results)
 
 
-    latex_str = format_results_to_latex_str (results)
-    with open( os.path.join(result_root_dir, 'sfm_latex_table.txt'), 'w') as f:
+        latex_str = format_results_to_latex_str (results)
+        with open( os.path.join(result_root_dir, 'sfm_latex_table.txt'), 'w') as f:
+            for s in latex_str:
+                f.write(s)
+                f.write("\n")
+
         for s in latex_str:
-            f.write(s)
-            f.write("\n")
-
-    for s in latex_str:
-        print(s)
+            print(s)
 
 

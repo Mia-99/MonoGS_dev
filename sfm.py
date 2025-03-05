@@ -382,6 +382,8 @@ class SFM(mp.Process):
         '''
         Initialize 3D Gaussians for sparse SfM point-cloud
         '''
+        if (max_iters <=0):
+            return
         progress_bar = tqdm(range(1, max_iters+1), desc="Phase1: Training progress")
         cam_cnt = 0
         for iteration in range(0, max_iters):
@@ -410,17 +412,19 @@ class SFM(mp.Process):
         '''
         BA (Gaussian, pose, calibration)
         '''
+        if (max_iters <=0):
+            return
         self.pose_optimizer = PoseOptimizer(self.viewpoint_stack)
         self.pose_optimizer.zero_grad()
         self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
-        self.calibration_optimizer.update_focal_learning_rate (lr = 0.01)
+        self.calibration_optimizer.update_focal_learning_rate (lr = 0.02)
         self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
         self.calibration_optimizer.zero_grad()
         progress_bar = tqdm(range(1, max_iters+1), desc="Phase2: Training progress")
         cam_cnt = 0
         for iteration in range(0, max_iters):
 
-            if iteration == 300:
+            if iteration == 250:
                 self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
                 self.calibration_optimizer.update_focal_learning_rate (lr = 0.002)
                 self.calibration_optimizer.update_kappa_learning_rate (lr = 0.001)
@@ -453,6 +457,8 @@ class SFM(mp.Process):
         '''
         Refine 3D Gaussians with SSIM loss
         '''
+        if (max_iters <=0):
+            return
         progress_bar = tqdm(range(1, max_iters+1), desc="Phase3: Training progress")
         cam_cnt = 0
         for iteration in range(0, max_iters):
@@ -476,7 +482,7 @@ class SFM(mp.Process):
         progress_bar.close()
 
 
-    def optimize (self, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, set_focal_error=None):
+    def optimize (self, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, set_focal_error=None, viewpoint_stack_reset=None):
 
         _, h, w = self.viewpoint_stack[0].original_image.shape
         self.image_margin_mask = torch.zeros(h, w).cuda()
@@ -485,7 +491,7 @@ class SFM(mp.Process):
         if self.focal_reference is None:
             self.focal_reference = np.sqrt(h*h + w*w)/2
 
-        if self.calibration_optimizer is None:            
+        if self.calibration_optimizer is None:
             self.calibration_optimizer = CalibrationOptimizer(self.viewpoint_stack, focal_reference = self.focal_reference, focal_optimizer_type = "Adam")
             self.calib_safe_guard = False
 
@@ -518,9 +524,16 @@ class SFM(mp.Process):
                 viewpoint.fy = viewpoint.aspect_ratio * focal
             rich.print(f"[bold red][Notice]: old fx {focal - noise_fx} ====> new fx {focal}.  Noise added {noise_fx}  [/bold red]")
 
+        if viewpoint_stack_reset is not None:
+            for cam in self.viewpoint_stack:
+                cam.clean()
+            self.viewpoint_stack = None
+            torch.cuda.empty_cache()
+            self.viewpoint_stack = viewpoint_stack_reset
+
         # SelfCalibrating Bundle adjustment
-        self.run_phase2(max_iters = phase2_CaliDBA_GSS_iter, update_Gaussian = True, update_pose = True, update_calibration = True, use_scale_space = True) # better not do this
-        self.run_phase2(max_iters = phase2_CaliDBA_iter, update_Gaussian = True, update_pose = True, update_calibration = True, use_scale_space = False)
+        self.run_phase2(max_iters = phase2_CaliDBA_GSS_iter, update_Gaussian = False, update_pose = True, update_calibration = True, use_scale_space = True) # FIX 3D Gaussian in this case. IMPORTANT!
+        self.run_phase2(max_iters = phase2_CaliDBA_iter,     update_Gaussian = True, update_pose = True, update_calibration = True, use_scale_space = False)
         
         # refinement using SSIM 
         self.run_phase3(max_iters = phase3_iter)
