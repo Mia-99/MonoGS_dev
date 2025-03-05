@@ -326,7 +326,7 @@ def format_results_to_latex_str (results):
     latex_str = []
 
     latex_str.append(f"\\begin{{tabular}}{{ l | c | c | ccc }}")
-    latex_str.append(" *  & RFE & ATE & PSNR & SSIM & LPIPS \\\\")
+    latex_str.append(" *  & RFE & ATE & PSNR$\\uparrow$ & SSIM$\\uparrow$ & LPIPS$\\downarrow$ \\\\")
     latex_str.append("\\midrule")
     for datasetname in results:
 
@@ -481,10 +481,10 @@ if __name__ == "__main__":
 
 
 
-    if True:
+    if False:
 
-        phase1_iter, phase3_iter = 100, 500
-        phase2_DBA_iter, phase2_CaliDBA_iter = 100, 1000
+        phase1_iter, phase3_iter = 200, 500
+        phase2_DBA_iter, phase2_CaliDBA_iter = 100, 500
         
 
         for datasetname, dataset in datasets_dict.items():
