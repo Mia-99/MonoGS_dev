@@ -164,7 +164,7 @@ class SLAM:
         if self.eval_rendering:
             #clean frontend images
             for idx in self.frontend.cameras:
-                self.frontend.cleanup(idx)
+                self.frontend.cameras[idx].depth = None
             torch.cuda.empty_cache()
 
             self.gaussians = self.frontend.gaussians
