@@ -167,7 +167,9 @@ def read_groundtruth_camera(ground_truth_camera_file):
 
 
 
-def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2, phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, set_focal_error = None, save_to_dir = None):
+def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
+                    phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, use_scale_space = False,
+                    set_focal_error = None, save_to_dir = None):
 
     # perform colmap reconstruction
     reconstruction = ColMap(image_dir)
@@ -212,6 +214,7 @@ def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_sc
                  phase2_DBA_iter = phase2_DBA_iter,
                  phase2_CaliDBA_iter = phase2_CaliDBA_iter,
                  phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
+                 use_scale_space = use_scale_space,
                 #  set_focal_error = set_focal_error/downsample_scale,
                  viewpoint_stack_reset = copy.deepcopy(viewpoint_stack_reset) if set_focal_error is not None else None
                  )
@@ -334,35 +337,45 @@ def format_results_to_latex_str (results):
 
     latex_str = []
 
-    latex_str.append(f"\\begin{{tabular}}{{ l | c | c | ccc }}")
+    gssY_str = "GSS \\cmark"
+    gssN_str = "GSS \\xmark"
+
+    latex_str.append(f"\\begin{{tabular}}{{ l | cc | cc | cc | cc | cc }}")
     latex_str.append(" *  & RFE & ATE & PSNR$\\uparrow$ & SSIM$\\uparrow$ & LPIPS$\\downarrow$ \\\\")
+    latex_str.append(f" *  & {gssY_str} & {gssN_str} & {gssY_str} & {gssN_str} & {gssY_str} & {gssN_str} & {gssY_str} & {gssN_str} & {gssY_str} & {gssN_str}  \\\\")
     latex_str.append("\\midrule")
     for datasetname in results:
 
-        latex_str.append(f"\\multicolumn{{6}}{{c}}{{ {datasetname} }}   \\\\")
+        latex_str.append(f"\\multicolumn{{11}}{{c}}{{ {datasetname} }}   \\\\")
         latex_str.append("\\midrule")
 
         for calib_flag in results[datasetname]:
-            result = results[datasetname][calib_flag]
 
-            downsample_scale = result["downsample_scale"]
+            if calib_flag == "w/o":
+                result_gssY = results[datasetname][calib_flag]
+                result_gssN = results[datasetname][calib_flag]
+            else:
+                result_gssY = results[datasetname][calib_flag][True]
+                result_gssN = results[datasetname][calib_flag][False]
 
-            gt_fx     = result["gt_K_arr"][-1][0, 0]
-            gt_kappa  = result["gt_dist_arr"][-1][0]
-            fx        = result["fx_arr"][-1] * downsample_scale
-            kappa     = result["kappa_arr"][-1]
+            downsample_scale = [ result_gssY["downsample_scale"], result_gssN["downsample_scale"] ]
 
-            RCE_focal = abs( (fx - gt_fx) / gt_fx )
+            gt_fx     = [ result_gssY["gt_K_arr"][-1][0, 0], result_gssN["gt_K_arr"][-1][0, 0] ]
+            gt_kappa  = [ result_gssY["gt_dist_arr"][-1][0], result_gssN["gt_dist_arr"][-1][0] ]
+            fx        = [ result_gssY["fx_arr"][-1] * downsample_scale[0],  result_gssN["fx_arr"][-1] * downsample_scale[1] ]
+            kappa     = [ result_gssY["kappa_arr"][-1],  result_gssN["kappa_arr"][-1] ]
+
+            RCE_focal = [ abs( (fx[0] - gt_fx[0]) / gt_fx[0] ),   abs( (fx[1] - gt_fx[1]) / gt_fx[1] ) ]
             # RCE_kappa = abs( (kappa - gt_kappa) / gt_kappa ) # gt_kappa = 0
 
-            APE_t     = result["APE_trans"]
-            APE_r     = result["APE_rot"]
+            APE_t     = [ result_gssY["APE_trans"], result_gssN["APE_trans"] ]
+            APE_r     = [ result_gssY["APE_rot"], result_gssN["APE_rot"] ]
 
-            gs_psnr   = result["psnr"]
-            gs_ssim   = result["ssim"]
-            gs_lpips  = result["lpips"]
+            gs_psnr   = [ result_gssY["psnr"], result_gssN["psnr"] ]
+            gs_ssim   = [ result_gssY["ssim"], result_gssN["ssim"] ]
+            gs_lpips  = [ result_gssY["lpips"], result_gssN["lpips"] ]
 
-            latex_str.append( f"{calib_flag} & {100*RCE_focal:.3f}\\%  &  {APE_t:.5f} & {gs_psnr:.2f} & {gs_ssim:.3f} & {gs_lpips:.4f}  \\\\" )
+            latex_str.append( f"{datasetname}: {calib_flag} & {100*RCE_focal[0]:.3f}\\%  &  {100*RCE_focal[1]:.3f}\\%  &  {APE_t[0]:.5f} & {APE_t[1]:.5f} & {gs_psnr[0]:.2f} & {gs_psnr[1]:.2f} & {gs_ssim[0]:.3f} & {gs_ssim[1]:.3f} & {gs_lpips[0]:.4f} & {gs_lpips[1]:.4f}  \\\\" )
 
     latex_str.append(f"\\end{{tabular}}")
 
@@ -468,10 +481,11 @@ if __name__ == "__main__":
 
     
     result_root_dir = os.path.join(os.getcwd(), "result_sfm")
+    pathlib.Path(result_root_dir).mkdir(parents=True, exist_ok=True)
 
-    phase1_iter, phase3_iter = 200, 500 # standard 3DGS rountine, camera not optimized
-    phase2_DBA_iter, phase2_CaliDBA_iter = 100, 1000 # Gaussian is free to optimize
-    phase2_CaliDBA_GSS_iter = 100 # Gaussian is fixed when performing scale space optimization
+    phase1_iter, phase3_iter = 300, 500 # standard 3DGS rountine, camera not optimized
+    phase2_DBA_iter, phase2_CaliDBA_iter = 100, 500 # Gaussian is free to optimize
+    phase2_CaliDBA_GSS_iter = 150 # Gaussian is fixed when performing scale space optimization
 
 
     if False:
@@ -483,16 +497,17 @@ if __name__ == "__main__":
         GT: 690
         """
         use_GSS = True
-        focal_error=-300
+        focal_error=100
         result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = True, downsample_scale = 2**2,
                     phase1_iter = phase1_iter,
                     phase3_iter = phase3_iter,
                     phase2_DBA_iter = phase2_DBA_iter,
                     phase2_CaliDBA_iter = phase2_CaliDBA_iter,
-                    phase2_CaliDBA_GSS_iter = (phase2_CaliDBA_GSS_iter if use_GSS else 0),
+                    phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
+                    use_scale_space = use_GSS,
                     set_focal_error=focal_error*(2**2),
                     save_to_dir=os.path.join(result_root_dir, "Debug", "withCalib"))
-        results = {datasetname : {"w/" : result}}
+        results = { datasetname : { "w/" : {use_GSS: result} }  }
         latex_str = format_results_to_latex_str (results)
         for s in latex_str:
             print(s)
@@ -524,6 +539,7 @@ if __name__ == "__main__":
                         phase2_DBA_iter = phase2_DBA_iter,
                         phase2_CaliDBA_iter = phase2_CaliDBA_iter,
                         phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
+                        use_scale_space = True,
                         save_to_dir=os.path.join(result_root_dir, datasetname, "withCalib"))
             # rich.print(result)
 
@@ -549,7 +565,8 @@ if __name__ == "__main__":
             results[datasetname]['w/o'] = result
     
             # w/. calibration
-            for focal_error in [0, -50, -100, -200, -300, 50, 100, 200, 300, 400, 500]:
+            # for focal_error in [0, -50, -100, -200, -300, 50, 100, 200, 300, 400, 500]:
+            for focal_error in [0, -50, -200, 50, 100, 300, 500]:
                 calib_str = 'w/'+str(focal_error) if focal_error !=0 else 'w/'
                 results[datasetname][calib_str] = {}
                 """
@@ -561,7 +578,8 @@ if __name__ == "__main__":
                             phase3_iter = phase3_iter,
                             phase2_DBA_iter = phase2_DBA_iter,
                             phase2_CaliDBA_iter = phase2_CaliDBA_iter,
-                            phase2_CaliDBA_GSS_iter = (phase2_CaliDBA_GSS_iter if use_GSS else 0),
+                            phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
+                            use_scale_space = use_GSS,
                             set_focal_error= (focal_error*(2**2) if focal_error is not None else None)
                         )
                     results[datasetname][calib_str][use_GSS] = result

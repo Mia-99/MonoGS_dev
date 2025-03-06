@@ -24,6 +24,8 @@ class CalibrationOptimizer:
 
     def __init__(self, viewpoint_stack, focal_reference = None, focal_optimizer_type = "Adam") -> None:
 
+        self.verbose = False
+
         self.viewpoint_stack = viewpoint_stack
 
         self.calibration_groups = {}
@@ -152,8 +154,10 @@ class CalibrationOptimizer:
                     focal = viewpoint_cam.fx
                     viewpoint_cam.fx += focal_delta
                     viewpoint_cam.fy += viewpoint_cam.aspect_ratio * focal_delta                
-                    CC = viewpoint_cam.camera_center.cpu().numpy()
-                    print(f">> uid: [{viewpoint_cam.uid:05d}], opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_n: {focal_delta_normalized:.7f}, grad_n: {focal_grad_normalized:.7f}, cam_center: [{CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}], exposure: [a: {viewpoint_cam.exposure_a.data.item():.5f}, b: {viewpoint_cam.exposure_b.data.item():.5f}]")
+                    
+                    if self.verbose:
+                        CC = viewpoint_cam.camera_center.cpu().numpy()
+                        print(f">> uid: [{viewpoint_cam.uid:05d}], opt_focal: {viewpoint_cam.fx:.3f}, df: {focal_delta:.4f}, df_n: {focal_delta_normalized:.7f}, grad_n: {focal_grad_normalized:.7f}, cam_center: [{CC[0]:.3f}, {CC[1]:.3f}, {CC[2]:.3f}], exposure: [a: {viewpoint_cam.exposure_a.data.item():.5f}, b: {viewpoint_cam.exposure_b.data.item():.5f}]")
                 return focal/self.focal_normalizer, focal_grad_normalized
 
 
@@ -166,7 +170,8 @@ class CalibrationOptimizer:
                 kappa_grad  = self.kappa_delta_groups [ cam_calib_id ].grad.cpu().numpy()[0]                
                 for viewpoint_cam in cam_stack:
                     viewpoint_cam.kappa += kappa_delta
-                    print(f">> uid: [{viewpoint_cam.uid:05d}], opt_kappa={viewpoint_cam.kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
+                    if self.verbose:
+                        print(f">> uid: [{viewpoint_cam.uid:05d}], opt_kappa={viewpoint_cam.kappa:.6f}, update={kappa_delta:.6f}, gradient={kappa_grad:.7f}")
                 return kappa_grad
 
     
@@ -246,7 +251,7 @@ class CalibrationOptimizer:
             if scale is not None:
                 lr = param_group["lr"]
                 param_group["lr"] = scale * lr if lr >= 0.00001 else lr
-            if param_group["name"] == "calibration_f_{}".format(self.current_calib_id):
+            if param_group["name"] == "calibration_f_{}".format(self.current_calib_id) and self.verbose:
                 rich.print("[bold green]focal_optimizer: update learning rate to:[/bold green]", param_group["lr"])
 
 
@@ -258,7 +263,7 @@ class CalibrationOptimizer:
             if scale is not None:
                 lr = param_group["lr"]
                 param_group["lr"] = scale * lr if lr >= 0.00001 else lr
-            if param_group["name"] == "calibration_k_{}".format(self.current_calib_id):
+            if param_group["name"] == "calibration_k_{}".format(self.current_calib_id) and self.verbose:
                 rich.print("[bold green]kappa_optimizer: update learning rate to:[/bold green]", param_group["lr"])
 
 
@@ -312,10 +317,10 @@ class PoseOptimizer:
 
 
 
-    def step(self):
+    def step(self, fix_uid = 0):
         self.pose_optimizer.step()
         for viewpoint_cam in self.viewpoint_stack:
-            if viewpoint_cam.uid != 0:
+            if viewpoint_cam.uid != fix_uid:
                 update_pose(viewpoint_cam)
 
 

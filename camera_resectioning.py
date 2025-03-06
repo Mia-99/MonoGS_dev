@@ -900,7 +900,7 @@ if __name__ == "__main__":
         return success, len(rle_focal)
 
 
-    if True:
+    if False:
 
         max_iters = 500
         dataset_root_dir = "/hdd/3DGS"
