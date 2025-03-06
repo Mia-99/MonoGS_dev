@@ -103,17 +103,6 @@ class SFM(mp.Process):
         self.allow_lens_distortion = self.opt.allow_lens_distortion
 
         self.focal_reference = None
-
-        self.start_calib_iter = 50
-        self.stop_calib_iter = 300
-
-        self.start_pose_iter = 50
-        self.stop_pose_iter = 300
-
-        self.start_gaussian_iter = 0
-        self.stop_gaussian_iter = 100000
-
-
         self.cameras_extent = cameras_extent
         # self.depth_anything = DepthAnything()
 
@@ -180,7 +169,7 @@ class SFM(mp.Process):
         self.run_phase1(max_iters = phase1_iter)
 
         # Bundle adjustment (no calibration, no pose update) to densify 3D Gaussians
-        self.run_phase2(max_iters = phase2_DBA_iter, update_Gaussian = True, update_pose = False, update_calibration = False)
+        self.run_phase2(max_iters = phase2_DBA_iter, update_Gaussian = True, update_pose = False, update_calibration = False, use_scale_space = False)
 
         if set_focal_error is not None:
             ''' For debug and test
@@ -207,8 +196,8 @@ class SFM(mp.Process):
         Note: in the guassian scale space optimization, make sure fix 3D Gaussians.
         """
         self.run_phase2(max_iters = phase2_CaliDBA_GSS_iter, update_Gaussian = False, update_pose = False, update_calibration = True, use_scale_space = use_scale_space)
-        self.run_phase2(max_iters = phase2_CaliDBA_GSS_iter, update_Gaussian = False, update_pose = True, update_calibration = True, use_scale_space = use_scale_space)
-        self.run_phase2(max_iters = phase2_CaliDBA_iter,     update_Gaussian = True, update_pose = True, update_calibration = True, use_scale_space = False)
+        self.run_phase2(max_iters = phase2_CaliDBA_GSS_iter, update_Gaussian = False, update_pose = True,  update_calibration = True, use_scale_space = False)
+        self.run_phase2(max_iters = phase2_CaliDBA_iter,     update_Gaussian = True,  update_pose = True,  update_calibration = True, use_scale_space = False)
         
         # refinement using SSIM 
         self.run_phase3(max_iters = phase3_iter)
@@ -239,7 +228,7 @@ class SFM(mp.Process):
                                            use_scale_space = False,
                                            use_ssim_loss = False
                                            )
-            if self.use_gui and (iteration % 5 == 0):
+            if self.use_gui and (iteration % 10 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
             if iteration % 10 == 0:
@@ -268,7 +257,7 @@ class SFM(mp.Process):
             self.read_gui_ctrl()
             (densify_prune, reset_opacity) = self.is_densify_prune()
             reset_opacity =  False
-            self.optimize_one_step (
+            self.optimize_one_step (iteration,
                                     update_Gaussian = update_Gaussian,
                                     update_pose = update_pose,
                                     update_calibration = update_calibration,
@@ -278,7 +267,7 @@ class SFM(mp.Process):
                                     )
             if self.verbose:
                 print_viewpoint_stack(self.viewpoint_stack, prefix="Camera")
-            if self.use_gui and (iteration % 5 == 0):
+            if self.use_gui and (iteration % 10 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
             if iteration % 10 == 0:
@@ -300,13 +289,13 @@ class SFM(mp.Process):
         for iteration in range(1, max_iters+1):
             self.read_gui_ctrl()
             (densify_prune, reset_opacity) = self.is_densify_prune()
-            self.optimize_one_step (
+            self.optimize_one_step (iteration,
                                     update_Gaussian = True,
                                     use_ssim_loss = True,
                                     densify_prune = densify_prune,
                                     reset_opacity = reset_opacity
                                     )
-            if self.use_gui and (iteration % 5 == 0):
+            if self.use_gui and (iteration % 10 == 0):
                 self.push_to_gui(cam_cnt)
                 cam_cnt = (cam_cnt+1) % len(self.viewpoint_stack)
             if iteration % 10 == 0:
@@ -543,7 +532,7 @@ class SFM(mp.Process):
                 self.pose_optimizer.zero_grad() # clear gradient every iteration
 
 
-    def optimize_one_step (self, update_Gaussian = False, update_pose = False, update_calibration = False,  use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
+    def optimize_one_step (self, iteration, update_Gaussian = False, update_pose = False, update_calibration = False,  use_scale_space = False, use_ssim_loss = False, densify_prune = False, reset_opacity = False):
 
         # FORWARD
         loss = self.compute_loss ( use_scale_space = use_scale_space,  use_SSIM = use_ssim_loss )
@@ -560,7 +549,7 @@ class SFM(mp.Process):
                 #     rich.print(f"[bold yellow]After loss.backward: [/bold yellow]{viewpoint.cam_focal_delta.grad=}")
                 self.calibration_optimizer.focal_step()
 
-                if self.allow_lens_distortion:
+                if self.allow_lens_distortion and iteration > 50:
                     # for viewpoint in self.viewpoint_stack:
                     #     rich.print(f"[bold red]After loss.backward: [/bold red]{viewpoint.cam_kappa_delta.grad=}")
                     self.calibration_optimizer.kappa_step()

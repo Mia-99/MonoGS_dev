@@ -15,7 +15,7 @@ class ColMap:
     
     """
 
-    def __init__ (self, image_dir = None):
+    def __init__ (self, image_dir = None, same_camera_intrinsics=True):
 
         self.reconstruction = None
 
@@ -23,12 +23,13 @@ class ColMap:
 
         self.single_cam_id = 1
 
+        self.same_camera_intrinsics = same_camera_intrinsics
+        self.avg_K = None
+        self.avg_distort = None
+
         if image_dir is not None:
             self.run(image_dir)
 
-
-        self.avg_K = None
-        self.avg_distort = None
 
     def run(self, image_dir=None):
 
@@ -80,7 +81,7 @@ class ColMap:
         self.reconstruction = maps[0]
         # print(self.reconstruction.summary())
 
-        if True:
+        if self.same_camera_intrinsics:
             # use single camera intrinsic calibration for all images
             self.__set_to_single_camera()
             '''
@@ -100,6 +101,11 @@ class ColMap:
         # pycolmap.undistort_images(mvs_path, output_path, image_dir)
         # pycolmap.patch_match_stereo(mvs_path)  # requires compilation with CUDA
         # pycolmap.stereo_fusion(mvs_path / "dense.ply", mvs_path)
+
+        calib_dict, avg_K, avg_kappa = self.__get_calibration()
+        self.avg_K = avg_K
+        self.avg_distort = np.array( [ avg_kappa ] )
+
 
 
     def bundleAdjustmentByGivenCalibration (self, focal = None, kappa = None, delta_focal = None):
@@ -251,17 +257,17 @@ if __name__ == "__main__":
     image_dir = "/home/fang/SURGAR/Colmap_Test/Fountain/images"
 
     # perform colmap reconstruction
-    reconstruction = ColMap(image_dir)
+    reconstruction = ColMap(image_dir, same_camera_intrinsics=True)
 
     for image_id, item in reconstruction.getCamPosedImages().items():
         R, T, imgname, K, kappa = item
-        print(f"fx = {K[0, 0]:.5f},  fy = {K[1, 1]:.5f},  cx = {K[0, 2]:.5f},  cy = {K[1, 2]:.5f}")
+        print(f"fx = {K[0, 0]:.5f},  fy = {K[1, 1]:.5f},  cx = {K[0, 2]:.5f},  cy = {K[1, 2]:.5f}, kappa = {kappa:.8f}")
 
     if False:
         reconstruction.bundleAdjustmentByGivenCalibration (focal = None, kappa = None, delta_focal = -1000)
         for image_id, item in reconstruction.getCamPosedImages().items():
             R, T, imgname, K, kappa = item
-            print(f"fx = {K[0, 0]:.5f},  fy = {K[1, 1]:.5f},  cx = {K[0, 2]:.5f},  cy = {K[1, 2]:.5f}")
+            print(f"fx = {K[0, 0]:.5f},  fy = {K[1, 1]:.5f},  cx = {K[0, 2]:.5f},  cy = {K[1, 2]:.5f}, kappa = {kappa:.8f}")
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud.  3. Calibrations
     positions, colors = reconstruction.getPointCloud()

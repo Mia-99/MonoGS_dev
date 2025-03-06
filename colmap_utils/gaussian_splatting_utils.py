@@ -26,8 +26,13 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0):
     camera_centers = []
     posed_image_stack = colmap.getCamPosedImages()
 
+    avg_K = colmap.avg_K  / downsample_scale
+    kappa = colmap.avg_distort[0]
+
+    fx, fy, cx, cy = avg_K[0, 0], avg_K[1, 1], avg_K[0, 2], avg_K[1, 2]
+
     for image_id, item in posed_image_stack.items():
-        R, T, imgname, K, kappa = item
+        R, T, imgname, K_, kappa_ = item
         
         image_path = os.path.join(colmap.image_dir, os.path.basename(imgname))
         image = Image.open(image_path)
@@ -40,12 +45,6 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0):
 
         image_height = gt_image.shape[1]
         image_width = gt_image.shape[2]
-        
-        fx = K[0, 0]  / downsample_scale
-        fy = K[1, 1]  / downsample_scale
-        cx = K[0, 2]  / downsample_scale
-        cy = K[1, 2]  / downsample_scale
-        kappa = kappa / downsample_scale
 
         cam = Camera (
                     uid = image_id,
