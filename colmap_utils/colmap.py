@@ -102,10 +102,6 @@ class ColMap:
         # pycolmap.patch_match_stereo(mvs_path)  # requires compilation with CUDA
         # pycolmap.stereo_fusion(mvs_path / "dense.ply", mvs_path)
 
-        calib_dict, avg_K, avg_kappa = self.__get_calibration()
-        self.avg_K = avg_K
-        self.avg_distort = np.array( [ avg_kappa ] )
-
 
 
     def bundleAdjustmentByGivenCalibration (self, focal = None, kappa = None, delta_focal = None):
@@ -115,6 +111,7 @@ class ColMap:
         '''
         BundleAdjustmentOptions
         https://colmap.github.io/pycolmap/pycolmap.html#pycolmap.BundleAdjustmentOptions
+
         '''
         ba_opts = pycolmap.BundleAdjustmentOptions(refine_focal_length = False, refine_extra_params = False)
         pycolmap.bundle_adjustment(self.reconstruction, options = ba_opts)
@@ -154,10 +151,10 @@ class ColMap:
     # Bring a world point X_world to camera frame
     # X_cam = R * X_world  +  t
     def getCamPosedImages(self):
-        calib_dict, avg_K, avg_kappa = self.__get_calibration()
-        self.avg_K = avg_K
-        self.avg_distort = np.array( [ avg_kappa ] )
+        calib_dict = self.__get_calibration()
         posed_image_dict = {}
+        self.avg_K = np.zeros((3,3))
+        avg_kappa = 0
         for image_id, image in self.reconstruction.images.items():
             pose = image.cam_from_world
             qvec = pose.rotation.quat
@@ -167,6 +164,11 @@ class ColMap:
             T = np.array( tvec )
             (K, kappa) = calib_dict[ image.camera_id ]
             posed_image_dict[image_id] = (R, T, image.name, K, kappa)
+            self.avg_K += K
+            avg_kappa += kappa
+        self.avg_K = self.avg_K/len( self.reconstruction.images )
+        avg_kappa = avg_kappa/len( self.reconstruction.images )
+        self.avg_distort = np.array( [ avg_kappa ] )
         return posed_image_dict
 
 
@@ -202,8 +204,6 @@ class ColMap:
 
     def __get_calibration(self):        
         calib_dict = {}
-        avg_K = np.zeros((3,3))
-        avg_kappa = 0.0
         for camera_id, camera in self.reconstruction.cameras.items():
             if camera.model == pycolmap.CameraModelId.SIMPLE_RADIAL:
                 fx = camera.params[0]
@@ -215,10 +215,8 @@ class ColMap:
                             [0.0, fy,  cy],
                             [0.0, 0.0, 1.0]])
                 calib_dict[camera_id] = (K, kappa)
-                avg_K += K
-                avg_kappa += kappa
-        return calib_dict,  avg_K/len(calib_dict),  avg_kappa/len(calib_dict)
-
+        return calib_dict
+    
 
     @staticmethod
     # copied from 3DGS colmap.loader.py
@@ -231,7 +229,7 @@ class ColMap:
 
     def __set_to_single_camera(self, focal = None, kappa = None, delta_focal = None):        
         # pick a camera
-        self.single_cam_id = list( self.reconstruction.cameras.keys() ).pop()
+        self.single_cam_id = list( self.reconstruction.cameras.keys() )[0]
         cam = self.reconstruction.cameras[ self.single_cam_id ]
         # set errors
         if focal is not None:
@@ -245,7 +243,7 @@ class ColMap:
             image = self.reconstruction.images[image_id]
             image.camera = cam
             assert image.camera_id==self.single_cam_id, "image.camera_id != self.single_cam_id"
-            
+        print(f"camera intrinsic vector: {cam.params}")
         return self.single_cam_id
 
 

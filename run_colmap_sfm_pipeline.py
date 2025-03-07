@@ -169,10 +169,10 @@ def read_groundtruth_camera(ground_truth_camera_file):
 
 def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = 2**2,
                     phase1_iter = 200, phase3_iter = 500, phase2_DBA_iter = 100, phase2_CaliDBA_iter = 500, phase2_CaliDBA_GSS_iter = 0, use_scale_space = False,
-                    set_focal_error = None, save_to_dir = None):
+                    set_focal_error = None, save_to_dir = None, COLMAP_same_camera_intrinsics = True):
 
     # perform colmap reconstruction
-    reconstruction = ColMap(image_dir, same_camera_intrinsics=True)
+    reconstruction = ColMap(image_dir, same_camera_intrinsics=COLMAP_same_camera_intrinsics)
 
     # extract reconstruction information: 1. posedCameras, 2. 3Dpointcloud
     viewpoint_stack, scale_info = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale)
@@ -201,9 +201,10 @@ def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_sc
     Create noisy intial value for DBA-Calib
     """
     viewpoint_stack_reset = None
+    fx_init = reconstruction.avg_K[0, 0]
     if set_focal_error is not None:
-        print(f"\nSet Focal Length Error:\n\tdelta_focal = {set_focal_error}. \n\tPerform BA to enforce this change.")
-        reconstruction.bundleAdjustmentByGivenCalibration(delta_focal=set_focal_error)
+        rich.print(f"\nSet Focal Length Error:\n\tdelta_focal = {set_focal_error*fx_init}. \n\tPerform BA to enforce this change.")
+        reconstruction.bundleAdjustmentByGivenCalibration(delta_focal=set_focal_error*fx_init)
         viewpoint_stack_reset, _ = assemble_3DGS_cameras(reconstruction,  downsample_scale = downsample_scale)        
         rich.print("\nPHASE 2")
         print_viewpoint_stack(viewpoint_stack_reset)
@@ -215,7 +216,7 @@ def run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_sc
                  phase2_CaliDBA_iter = phase2_CaliDBA_iter,
                  phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
                  use_scale_space = use_scale_space,
-                #  set_focal_error = set_focal_error/downsample_scale,
+                #  set_focal_error = set_focal_error*fx_init,
                  viewpoint_stack_reset = copy.deepcopy(viewpoint_stack_reset) if set_focal_error is not None else None
                  )
 
@@ -352,8 +353,9 @@ def format_results_to_latex_str (results):
         for calib_flag in results[datasetname]:
 
             if calib_flag == "w/o":
-                result_gssY = results[datasetname][calib_flag]
-                result_gssN = results[datasetname][calib_flag]
+                print(results[datasetname].keys())
+                result_gssY = results[datasetname][calib_flag][True] #  w/. COLMAP_GBA
+                result_gssN = results[datasetname][calib_flag][False] # w/o COLMAP_GBA
             else:
                 result_gssY = results[datasetname][calib_flag][True]
                 result_gssN = results[datasetname][calib_flag][False]
@@ -375,9 +377,16 @@ def format_results_to_latex_str (results):
             gs_ssim   = [ result_gssY["ssim"], result_gssN["ssim"] ]
             gs_lpips  = [ result_gssY["lpips"], result_gssN["lpips"] ]
 
-            calib_output_str = calib_flag if calib_flag != "w/o" else "COLMAP"
+            if calib_flag != "w/o":
+                calib_output_str = calib_flag 
+                latex_str.append( f"\\#{datasetname} [{calib_output_str}] & {100*RCE_focal[0]:.3f}\\%  &  {100*RCE_focal[1]:.3f}\\%  &  {APE_t[0]:.5f} & {APE_t[1]:.5f} & {gs_psnr[0]:.2f} & {gs_psnr[1]:.2f} & {gs_ssim[0]:.3f} & {gs_ssim[1]:.3f} & {gs_lpips[0]:.4f} & {gs_lpips[1]:.4f}  \\\\" )
+            else:
 
-            latex_str.append( f"{datasetname} [{calib_output_str}] & {100*RCE_focal[0]:.3f}\\%  &  {100*RCE_focal[1]:.3f}\\%  &  {APE_t[0]:.5f} & {APE_t[1]:.5f} & {gs_psnr[0]:.2f} & {gs_psnr[1]:.2f} & {gs_ssim[0]:.3f} & {gs_ssim[1]:.3f} & {gs_lpips[0]:.4f} & {gs_lpips[1]:.4f}  \\\\" )
+                calib_output_str = "COLMAP+SIFT"
+                latex_str.append( f"\\#{datasetname} [{calib_output_str}] & {100*RCE_focal[1]:.3f}\\%  &  {100*RCE_focal[1]:.3f}\\%  &  {APE_t[1]:.5f} & {APE_t[1]:.5f} & {gs_psnr[1]:.2f} & {gs_psnr[1]:.2f} & {gs_ssim[1]:.3f} & {gs_ssim[1]:.3f} & {gs_lpips[1]:.4f} & {gs_lpips[1]:.4f}  \\\\" )
+
+                calib_output_str = "COLMAP+SIFT+GBA"
+                latex_str.append( f"\\#{datasetname} [{calib_output_str}] & {100*RCE_focal[0]:.3f}\\%  &  {100*RCE_focal[0]:.3f}\\%  &  {APE_t[0]:.5f} & {APE_t[0]:.5f} & {gs_psnr[0]:.2f} & {gs_psnr[0]:.2f} & {gs_ssim[0]:.3f} & {gs_ssim[0]:.3f} & {gs_lpips[0]:.4f} & {gs_lpips[0]:.4f}  \\\\" )
 
     latex_str.append(f"\\end{{tabular}}")
 
@@ -490,7 +499,7 @@ if __name__ == "__main__":
     phase2_CaliDBA_GSS_iter = 200 # Gaussian is fixed when performing scale space optimization
 
     
-    if True:
+    if False:
 
         downsample_scale = 2**2
 
@@ -501,7 +510,7 @@ if __name__ == "__main__":
         GT: 690
         """
         use_GSS = True
-        focal_error=0
+        focal_error=0.2
         result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = True, downsample_scale = downsample_scale,
                     phase1_iter = phase1_iter,
                     phase3_iter = phase3_iter,
@@ -509,7 +518,7 @@ if __name__ == "__main__":
                     phase2_CaliDBA_iter = phase2_CaliDBA_iter,
                     phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
                     use_scale_space = use_GSS,
-                    set_focal_error=focal_error*downsample_scale,
+                    set_focal_error=focal_error,
                     save_to_dir=os.path.join(result_root_dir, "Debug", "withCalib"))
         results = { datasetname : { "w/"+str(focal_error) : {True: result, False: result} }  }
         latex_str = format_results_to_latex_str (results)
@@ -549,7 +558,7 @@ if __name__ == "__main__":
             # rich.print(result)
 
 
-    if True:
+    if False:
 
         downsample_scale = 2
     
@@ -561,26 +570,35 @@ if __name__ == "__main__":
 
             image_dir, gt_dir = dataset["image_dir"], dataset["gt_dir"]
 
+            results[datasetname]['w/o'] = {}
 
-            # w/o clibration
-            result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = downsample_scale,
-                        phase1_iter = phase1_iter,
-                        phase3_iter = phase3_iter,
-                        phase2_DBA_iter = phase2_DBA_iter+phase2_CaliDBA_iter+phase2_CaliDBA_GSS_iter,
-                        phase2_CaliDBA_iter = 0,
-                        phase2_CaliDBA_GSS_iter = 0)
-            results[datasetname]['w/o'] = result
+            for COLMAP_same_camera_intrinsics in [True, False]:
+
+                # w/o clibration
+                result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = downsample_scale,
+                            phase1_iter = phase1_iter,
+                            phase3_iter = phase3_iter,
+                            phase2_DBA_iter = phase2_DBA_iter+phase2_CaliDBA_iter+phase2_CaliDBA_GSS_iter,
+                            phase2_CaliDBA_iter = 0,
+                            phase2_CaliDBA_GSS_iter = 0,
+                            COLMAP_same_camera_intrinsics = COLMAP_same_camera_intrinsics
+                            )
+                results[datasetname]['w/o'][COLMAP_same_camera_intrinsics] = result
+
+                with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'wb') as f:
+                    pickle.dump(results, f)
+
+            # continue
     
             # w/. calibration
-            # for focal_error in [0, -50, -100, -200, -300, 50, 100, 200, 300, 400, 500]:
-            for focal_error in [0, -50, -200, 50, 500]:
-            # for focal_error in [0]:
+            for focal_error in [None, 0, -0.1, 0.1]: # None disables global bundle adjustment in COLMAP
+            # for focal_error in [0, -0.1, -0.2, 0.1, 0.2]:
                 calib_str = 'w/'+str(focal_error) if focal_error !=0 else 'w/'
                 results[datasetname][calib_str] = {}
                 """
                 with and without Gaussian scale space
                 """
-                for use_GSS in [True, False]: 
+                for use_GSS in [True, False]:
                     result = run_colmap_sfm (image_dir, gt_dir, pipe, opt, use_gui = False, downsample_scale = downsample_scale,
                             phase1_iter = phase1_iter,
                             phase3_iter = phase3_iter,
@@ -588,7 +606,8 @@ if __name__ == "__main__":
                             phase2_CaliDBA_iter = phase2_CaliDBA_iter,
                             phase2_CaliDBA_GSS_iter = phase2_CaliDBA_GSS_iter,
                             use_scale_space = use_GSS,
-                            set_focal_error= (focal_error*downsample_scale if focal_error is not None else None)
+                            set_focal_error= focal_error,
+                            COLMAP_same_camera_intrinsics = False
                         )
                     results[datasetname][calib_str][use_GSS] = result
                     with open( os.path.join(result_root_dir, 'saved_results.pkl'), 'wb') as f:

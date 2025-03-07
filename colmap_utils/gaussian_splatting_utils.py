@@ -26,10 +26,16 @@ def assemble_3DGS_cameras(colmap : ColMap, downsample_scale = 1.0):
     camera_centers = []
     posed_image_stack = colmap.getCamPosedImages()
 
+    for image_id, item in colmap.getCamPosedImages().items():
+        R, T, imgname, K, kappa = item
+        print(f"All cameras: fx = {K[0, 0]:.5f},  fy = {K[1, 1]:.5f},  cx = {K[0, 2]:.5f},  cy = {K[1, 2]:.5f}, kappa = {kappa:.8f}")
+    print(f"colmap.avg_K = {colmap.avg_K}, colmap.avg_distort = {colmap.avg_distort}")
+
     avg_K = colmap.avg_K  / downsample_scale
     kappa = colmap.avg_distort[0]
 
     fx, fy, cx, cy = avg_K[0, 0], avg_K[1, 1], avg_K[0, 2], avg_K[1, 2]
+    print(f"fx = {fx:.5f},  fy = {fy:.5f},  cx = {cx:.5f},  cy = {cy:.5f}, kappa = {kappa:.8f}")
 
     for image_id, item in posed_image_stack.items():
         R, T, imgname, K_, kappa_ = item

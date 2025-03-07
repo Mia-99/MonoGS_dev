@@ -4,7 +4,7 @@ from math import pi
 from matplotlib.patches import Ellipse
 
 from numpy import linalg as LA
-
+import os, sys, time
 
 from matplotlib import style
 print(plt.style.available)
@@ -33,7 +33,7 @@ def pltCovMat2D (ax, mu, Sigma, edgecolor = 'k',faceColor = 'None' ):
     height = np.sqrt(lamdba2)
 
     ellipse = Ellipse(xy=mu, width=width, height=height, angle=theta,
-                        ec=edgecolor, fc=faceColor, lw=2, alpha=0.6)
+                        ec=edgecolor, fc=faceColor, lw=1.5, alpha=0.8 if faceColor is not None else 1.0)
     ax.add_patch(ellipse)
     
     line_length = 0.2
@@ -97,6 +97,8 @@ def main(focal, kappa):
     # plt.style.use('bmh')
 
 
+
+
     size = 10
     params = {'legend.fontsize': 'large',
             'figure.figsize': (3.5, 3.5),
@@ -105,6 +107,7 @@ def main(focal, kappa):
             'xtick.labelsize': size*0.75,
             'ytick.labelsize': size*0.75,
             'axes.titlepad': 10,
+            "axes.edgecolor" : 'ivory'
             }
     
     if focal == 1.0:
@@ -118,37 +121,50 @@ def main(focal, kappa):
     plt.rcParams.update(params)
 
 
-    dark_red = '#8B0000'
-    light_red = '#FF6347'
-    light_light_red = '#FFA07A'
-    dark_blue = '#00008B'
-    light_blue = '#ADD8E6'
-    light_light_blue = '#B0E0E6'
+    bg_color='aliceblue'
+    # bg_color='azure'
+    # bg_color='lavender'
+    # bg_color = 'whitesmoke'
+    # bg_color = 'floralwhite'
+    # bg_color = 'mintcream'
+    # bg_color = 'snow'
+    
+
+    ellipse_opts = 4
+    if ellipse_opts==1:
+        color1 = 'mistyrose'
+        color2 = 'lavender'
+        color3 = 'thistle'
+        color4 = 'palegoldenrod'
+        color5 = 'lightgray'
+    if ellipse_opts==2:
+        color1 = 'cornflowerblue'
+        color2 = 'gold'
+        color3 = 'tan'
+        color4 = 'khaki'
+        color5 = 'c'
+    if ellipse_opts==3:
+        color1 = 'skyblue'
+        color2 = 'tan'
+        color3 = 'palegoldenrod'
+        color4 = 'gainsboro'
+        color5 = 'lightslategray'
+    if ellipse_opts==4:
+        color1 = 'skyblue'
+        color2 = 'tan'
+        color3 = 'palegoldenrod'
+        color4 = 'gainsboro'
+        color5 = 'lightsteelblue'
+        
+
+
+
+    color_distortion_field = 'blue'
+    color_distorted_lines = 'gray' #'#8B0000'
 
 
     # kappa = -0.08
     # focal = 1.0
-
-    # color_original_points = 'white'
-    # color_distorted_points = dark_blue
-    color_distortion_field = 'tab:green'
-
-    # color_ellipse_original = light_blue 
-    # color_ellipse_distorted = dark_blue
-
-
-    color_distorted_lines = dark_red
-    
-
-    color_ellipse_original = 'tab:blue'
-    color_ellipse_distorted = 'tab:orange'
-
-    color1 = 'tab:purple'
-    color2 = 'tab:orange'
-    color3 = 'tab:blue'
-    color4 = 'tab:pink'
-    color5 = 'tab:olive'
-
 
     nx, ny = (9, 9)
     x = np.linspace(-1.0, 1.0, nx)
@@ -166,7 +182,7 @@ def main(focal, kappa):
     ax = fig.gca()
     ax.set(xlim=(-focal, focal), ylim=(-focal, focal), aspect="equal")
 
-    ax.fill_between([-1, 1], -1, 1, color='cyan', alpha=0.1)
+    ax.fill_between([-1, 1], -1, 1, color=bg_color, alpha=1.0)
 
     # ax.plot(xv, yv, marker='.', color=color_original_points, linestyle='none')
     # ax.plot(xv_new, yv_new, marker='.', color=color_distorted_points, linestyle='none')
@@ -208,11 +224,15 @@ def main(focal, kappa):
 
     ax.set_title(f'$\kappa = {kappa}$,   $f = {focal}$')
 
+    ax.tick_params(direction='out', length=2, width=2, colors='darkslategrey', grid_color='r', grid_alpha=0.5)
+
     distortion_type = "barrel" if kappa < 0 else "pincushion"
 
     plt.tight_layout(pad = 0.5)
-    plt.savefig(f"gaussian_distortion_{distortion_type}_{focal}.pdf")    
-    plt.show(block=True)
+    plt.savefig(os.path.join( os.path.dirname(os.path.realpath(__file__)), f"gaussian_distortion_{distortion_type}_{focal}.pdf"))    
+    # plt.show(block=True)
+    # time.sleep(1.1)
+    plt.close()
 
 
 
