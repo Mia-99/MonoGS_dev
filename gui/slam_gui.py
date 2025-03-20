@@ -59,6 +59,11 @@ class SLAM_GUI:
             self.q_main2vis = params_gui.q_main2vis
             self.q_vis2main = params_gui.q_vis2main
             self.pipe = params_gui.pipe
+            self.record_to_dir = params_gui.record_to_dir # save frames for video recording
+
+        self.camera_info = None
+        if self.record_to_dir is not None:
+            pathlib.Path(self.record_to_dir).mkdir(parents=True, exist_ok=True)
 
         self.gaussian_nums = []
 
@@ -270,6 +275,8 @@ class SLAM_GUI:
         frustum.update_pose(C2W)
         self.widget3d.scene.set_geometry_transform(name, C2W.astype(np.float64))
         self.widget3d.scene.show_geometry(name, self.cameras_chbox.checked)
+        if name == "current":
+            self.camera_info = ( camera.uid, camera.calib_id, C2W, (camera.fx, camera.fy, camera.kappa) )
         return frustum
 
     def _on_layout(self, layout_context):
@@ -364,6 +371,19 @@ class SLAM_GUI:
         save_dir.mkdir(parents=True, exist_ok=True)
         # create the filename
         filename = save_dir / "screenshot"
+        self._save_screen_to_file(filename)
+        # height = self.window.size.height
+        # width = self.widget3d_width
+        # app = o3d.visualization.gui.Application.instance
+        # img = np.asarray(app.render_to_image(self.widget3d.scene, width, height))
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # cv2.imwrite(f"{filename}-gui.png", img)
+        # img = np.asarray(self.render_img)
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # cv2.imwrite(f"{filename}.png", img)
+
+
+    def _save_screen_to_file(self, filename):
         height = self.window.size.height
         width = self.widget3d_width
         app = o3d.visualization.gui.Application.instance
@@ -373,6 +393,24 @@ class SLAM_GUI:
         img = np.asarray(self.render_img)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         cv2.imwrite(f"{filename}.png", img)
+
+
+    def save_gui(self):
+        if self.record_to_dir is None:
+            return
+        if self.render_img is None:
+            return
+        # create the filename
+        dt = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        filename = pathlib.Path(self.record_to_dir) / dt
+        self._save_screen_to_file(filename)
+        # save camera info to text
+        (uid, calib_id, C2W, (fx, fy, kappa)) = self.camera_info    
+        with open(f"{filename}.txt", "w") as myfile:
+            CC = C2W[:3, 3]   
+            s = f"uid: {uid}\ncalib_id: {calib_id}\nfx: {fx:.2f}\nfy: {fy:.2f}\nkappa: {kappa:.5f}\ncam_center: {CC[0]:.5f}, {CC[1]:.5f}, {CC[2]:.5f}\n{self.output_info.text}"
+            myfile.write(s)
+
 
     @staticmethod
     def resize_img(img, width):
@@ -702,6 +740,7 @@ class SLAM_GUI:
             def update():
                 if self.step % 3 == 0:
                     self.scene_update()
+                    self.save_gui()
 
                 if self.step >= 1e9:
                     self.step = 0

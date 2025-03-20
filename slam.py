@@ -136,6 +136,7 @@ class SLAM:
             gaussians=self.gaussians,
             q_main2vis=q_main2vis,
             q_vis2main=q_vis2main,
+            record_to_dir=os.path.join(save_dir, "recording") if self.config["Results"]["record"] else None
         )
 
         backend_process = mp.Process(target=self.backend.run)
@@ -272,6 +273,7 @@ if __name__ == "__main__":
     parser.add_argument("--disable_gui", action="store_true", default=False, help='default=False. force to disable gui') # overwrite config
     parser.add_argument("--use_gt_pose", action="store_true", default=False, help='default=False. use provided ground-truth poses') # use ground-truth poses
     parser.add_argument("--save_dir", type=str, default=None, help='path to save slam results, default=results')
+    parser.add_argument("--record", action="store_true", default=False)
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -360,6 +362,7 @@ if __name__ == "__main__":
         )
         wandb.define_metric("frame_idx")
         wandb.define_metric("ate*", step_metric="frame_idx")
+        config["Results"]["record"] = args.record
 
 
 

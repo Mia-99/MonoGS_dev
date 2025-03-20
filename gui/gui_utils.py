@@ -167,9 +167,11 @@ class ParamsGUI:
         gaussians=None,
         q_main2vis=None,
         q_vis2main=None,
+        record_to_dir=None,
     ):
         self.pipe = pipe
         self.background = background
         self.gaussians = gaussians
         self.q_main2vis = q_main2vis
         self.q_vis2main = q_vis2main
+        self.record_to_dir = record_to_dir
