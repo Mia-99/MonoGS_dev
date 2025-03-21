@@ -60,11 +60,14 @@ class SLAM_GUI:
             self.q_vis2main = params_gui.q_vis2main
             self.pipe = params_gui.pipe
             self.record_to_dir = params_gui.record_to_dir # save frames for video recording
-
+        
+        # save info for video recording
         self.camera_info = None
         self.rgb_img = None
         if self.record_to_dir is not None:
-            pathlib.Path(self.record_to_dir).mkdir(parents=True, exist_ok=True)
+            self.record_to_dir = pathlib.Path(self.record_to_dir)
+            self.record_to_dir.mkdir(parents=True, exist_ok=True)
+        self.keyframes_C2W = {}
 
         self.gaussian_nums = []
 
@@ -276,8 +279,10 @@ class SLAM_GUI:
         frustum.update_pose(C2W)
         self.widget3d.scene.set_geometry_transform(name, C2W.astype(np.float64))
         self.widget3d.scene.show_geometry(name, self.cameras_chbox.checked)
-        if name == "current":
+        if (self.record_to_dir is not None) and name == "current":
             self.camera_info = ( camera.uid, camera.calib_id, C2W, (camera.fx, camera.fy, camera.kappa) )
+        if (self.record_to_dir is not None) and name == "keyframe_{}".format(camera.uid):
+            self.keyframes_C2W[camera.uid] = C2W
         return frustum
 
     def _on_layout(self, layout_context):
@@ -403,7 +408,7 @@ class SLAM_GUI:
             return
         # create the filename
         dt = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        filename = pathlib.Path(self.record_to_dir) / dt
+        filename = self.record_to_dir / dt
         self._save_screen_to_file(filename)
         # save camera info to text
         (uid, calib_id, C2W, (fx, fy, kappa)) = self.camera_info    
@@ -411,6 +416,12 @@ class SLAM_GUI:
             CC = C2W[:3, 3]   
             s = f"uid: {uid}\ncalib_id: {calib_id}\nfx: {fx:.2f}\nfy: {fy:.2f}\nkappa: {kappa:.5f}\ncam_center: {CC[0]:.5f}, {CC[1]:.5f}, {CC[2]:.5f}\n{self.output_info.text}"
             myfile.write(s)
+            myfile.write("\n\nlist of keyframe poses [C2W]\n")
+            for uid, C2W in self.keyframes_C2W.items():
+                CC = C2W[:3, 3]   
+                s = f"uid: {uid} cam_center: {CC[0]:.5f}, {CC[1]:.5f}, {CC[2]:.5f}\n"
+                myfile.write(s)
+
         # save rgb image
         self.rgb_img = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2RGB)
         cv2.imwrite(f"{filename}-rgb.png", self.rgb_img)
