@@ -62,6 +62,7 @@ class SLAM_GUI:
             self.record_to_dir = params_gui.record_to_dir # save frames for video recording
 
         self.camera_info = None
+        self.rgb_img = None
         if self.record_to_dir is not None:
             pathlib.Path(self.record_to_dir).mkdir(parents=True, exist_ok=True)
 
@@ -410,6 +411,10 @@ class SLAM_GUI:
             CC = C2W[:3, 3]   
             s = f"uid: {uid}\ncalib_id: {calib_id}\nfx: {fx:.2f}\nfy: {fy:.2f}\nkappa: {kappa:.5f}\ncam_center: {CC[0]:.5f}, {CC[1]:.5f}, {CC[2]:.5f}\n{self.output_info.text}"
             myfile.write(s)
+        # save rgb image
+        self.rgb_img = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2RGB)
+        cv2.imwrite(f"{filename}-rgb.png", self.rgb_img)
+
 
 
     @staticmethod
@@ -482,10 +487,10 @@ class SLAM_GUI:
             self._on_kf_window_chbox(is_checked=self.kf_window_chbox.checked)
 
         if gaussian_packet.gtcolor is not None:
-            rgb = torch.clamp(gaussian_packet.gtcolor, min=0, max=1.0) * 255
-            rgb = rgb.byte().permute(1, 2, 0).contiguous().cpu().numpy()
-            rgb = o3d.geometry.Image(rgb)
-            self.in_rgb_widget.update_image(rgb)
+            self.rgb_img = torch.clamp(gaussian_packet.gtcolor, min=0, max=1.0) * 255
+            self.rgb_img = self.rgb_img.byte().permute(1, 2, 0).contiguous().cpu().numpy()
+            rgb = o3d.geometry.Image(self.rgb_img)
+            self.in_rgb_widget.update_image(rgb)            
 
         if gaussian_packet.gtdepth is not None:
             depth = gaussian_packet.gtdepth
