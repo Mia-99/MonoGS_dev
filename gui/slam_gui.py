@@ -423,8 +423,8 @@ class SLAM_GUI:
                 myfile.write(s)
 
         # save rgb image
-        self.rgb_img = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2RGB)
-        cv2.imwrite(f"{filename}-rgb.png", self.rgb_img)
+        bgr = cv2.cvtColor(self.rgb_img, cv2.COLOR_RGB2BGR) # use different variables for in and out, otherwise there will be a bug. same for cv2.COLOR_BGR2RGB
+        cv2.imwrite(f"{filename}-rgb.png", bgr)
 
 
 
